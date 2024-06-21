@@ -126,6 +126,7 @@ impl EventListener for ShotClock {
                     ..*event
                 });
             }
+            (C::GameClock, Event::Clock(E::Set(_))) => {}
             _ => self.shot_clock.notify(event),
         };
     }
