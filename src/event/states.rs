@@ -25,11 +25,18 @@ impl<'a> FromParam<'a> for ClockEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, EnumString)]
+#[strum(ascii_case_insensitive)]
 pub enum CounterEvent {
-    Set(Duration),
+    Set(u64),
     Increment,
     Decrement,
+}
+impl<'a> FromParam<'a> for CounterEvent {
+    type Error = ParseError;
+    fn from_param(param: &'a str) -> Result<Self, Self::Error> {
+        param.try_into()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
