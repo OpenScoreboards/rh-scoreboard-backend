@@ -1,17 +1,27 @@
+use std::{
+    borrow::BorrowMut,
+    cell::RefCell,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
 use serde::Serialize;
 use serde_json::Map;
 
 use crate::{
-    event::{states::CounterEvent, Event, EventListener, LogEvent},
-    ScoreboardComponent,
+    component::Component,
+    event::{
+        states::{CounterEvent, ToggleEvent},
+        Event, EventListener, EventLogger, LogEvent,
+    },
+    Scoreboard, ScoreboardComponent,
 };
 
 use super::DataComponent;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Counter {
     value: u64,
-    #[serde(skip_serializing)]
     name: String,
 }
 impl Counter {
@@ -43,3 +53,41 @@ impl EventListener for Counter {
     }
 }
 impl ScoreboardComponent for Counter {}
+
+#[derive(Debug)]
+pub struct TeamFoulCounter<EL: EventLogger> {
+    event_logger: Arc<Mutex<EL>>,
+    team_fouls: Counter,
+}
+impl<EL: EventLogger> TeamFoulCounter<EL> {
+    pub fn new(event_logger: Arc<Mutex<EL>>, name: String) -> Self {
+        TeamFoulCounter {
+            event_logger,
+            team_fouls: Counter::new(name),
+        }
+    }
+}
+impl<EL: EventLogger> DataComponent for TeamFoulCounter<EL> {
+    fn get_data(&self) -> serde_json::Value {
+        self.team_fouls.get_data()
+    }
+}
+impl<EL: EventLogger> EventListener for TeamFoulCounter<EL> {
+    fn notify(&mut self, event: &LogEvent) {
+        use CounterEvent as E;
+        match &event.event {
+            Event::Counter(E::Increment)
+                if self.team_fouls.value != 4 && (self.team_fouls.value + 1) % 5 == 0 =>
+            {
+                self.event_logger.borrow_mut().lock().unwrap().log_event(
+                    Component::HomeTeamFoulWarning,
+                    Event::ToggleEvent(ToggleEvent::Activate),
+                )
+            }
+            _ => {
+            }
+        };
+        self.team_fouls.notify(event);
+    }
+}
+impl<EL: EventLogger> ScoreboardComponent for TeamFoulCounter<EL> {}
