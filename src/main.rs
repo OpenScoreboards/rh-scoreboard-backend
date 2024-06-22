@@ -239,7 +239,6 @@ async fn rocket() -> _ {
                     continue;
                 }
                 let time_elapsed = Instant::now() - clock_data.last_state_change;
-                eprintln!("{time_elapsed:?}");
                 if time_elapsed > clock_data.last_time_remaining {
                     watcher
                         .send(LogEvent::new(

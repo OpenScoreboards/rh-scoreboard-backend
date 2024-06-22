@@ -49,7 +49,6 @@ impl ClockComponent {
                 self.last_state_change = event.timestamp;
             }
             (_, E::Expired) => {
-                eprintln!("expire");
                 self.state = S::Stopped;
                 self.last_state_change = event.timestamp;
                 self.last_time_remaining = Duration::from_secs(0);
