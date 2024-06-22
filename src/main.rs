@@ -23,7 +23,7 @@ use rocket::{
     http::Header,
     tokio::{
         self,
-        sync::broadcast::{self, Sender},
+        sync::broadcast::{self, error::RecvError, Sender},
         time::sleep,
     },
     Request, Response, State,
@@ -72,10 +72,19 @@ fn echo_stream(ws: ws::WebSocket, sender: &State<Sender<LogEvent>>) -> ws::Chann
     // let b = ws.broadcaster();
     ws.channel(move |mut stream| {
         Box::pin(async move {
-            let mut last = Message::Text("".into());
+            let mut last = Message::Text(get_data(sender).await);
+            if let e @ Err(_) = stream.send(last.clone()).await {
+                eprintln!("{e:?}");
+                return Ok(());
+            }
             loop {
-                let Ok(message) = recv.recv().await else {
-                    continue;
+                let message = match recv.recv().await {
+                    Ok(message) => message,
+                    e @ Err(RecvError::Closed) => {
+                        eprintln!("{e:?}");
+                        break;
+                    }
+                    _ => continue,
                 };
                 if matches!(message.event, Event::DataLog(_)) {
                     continue;
@@ -83,12 +92,15 @@ fn echo_stream(ws: ws::WebSocket, sender: &State<Sender<LogEvent>>) -> ws::Chann
                 let data = Message::Text(get_data(sender).await);
                 if data != last {
                     last = data;
-                    stream
-                        .send(Message::Text(get_data(sender).await))
-                        .await
-                        .unwrap();
+                    eprintln!("writing to data_stream");
+                    if let e @ Err(_) = stream.send(Message::Text(get_data(sender).await)).await {
+                        eprintln!("{e:?}");
+                        break;
+                    };
                 }
             }
+            eprintln!("break ws");
+            Ok(())
         })
     })
 }
