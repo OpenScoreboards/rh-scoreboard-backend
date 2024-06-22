@@ -16,6 +16,7 @@ pub struct ClockComponent {
     pub state: ClockState,
     #[serde(with = "serde_millis")]
     pub last_state_change: Instant,
+    #[serde(with = "serde_millis")]
     pub last_time_remaining: Duration,
 }
 impl ClockComponent {
@@ -41,8 +42,9 @@ impl ClockComponent {
             }
             (S::Running, E::Stop) => {
                 self.state = S::Stopped;
-                let time_elapsed = self.last_state_change - Instant::now();
-                self.last_time_remaining -= time_elapsed;
+                let time_elapsed = Instant::now() - self.last_state_change;
+                self.last_time_remaining = self.last_time_remaining.saturating_sub(time_elapsed);
+                self.last_state_change = event.timestamp;
             }
             (S::Stopped, E::Start) => {
                 self.state = S::Running;

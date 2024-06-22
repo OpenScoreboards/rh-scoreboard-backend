@@ -45,9 +45,6 @@ impl InteralToggle {
         let Event::Toggle(counter_event) = &event.event else {
             return;
         };
-        if matches!(event.component, Component::Global(GlobalComponent::Siren)) {
-            eprintln!("process event {event:?}");
-        }
         use ToggleEvent as E;
         self.state = match *counter_event {
             E::Activate => ToggleState::Active,
