@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use rocket::request::FromParam;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use strum::{EnumString, ParseError};
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ClockState {
     Stopped,
     Running,

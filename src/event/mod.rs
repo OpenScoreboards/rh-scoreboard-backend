@@ -48,11 +48,3 @@ pub fn handle_data_log<T: Fn() -> Value>(
     }
     false
 }
-
-pub trait EventListener: Send + Sync + std::fmt::Debug {
-    fn notify(&mut self, event: &LogEvent);
-}
-
-pub trait EventLogger: Send + Sync + std::fmt::Debug {
-    fn log_event(&mut self, component: Component, event: Event);
-}

@@ -89,7 +89,7 @@ generate_components!(
         counter:
             - Period
         toggle:
-            - GlobalToggle
+            - Siren
     per_team:
         clock:
             - InferiorityClock

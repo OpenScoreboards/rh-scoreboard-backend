@@ -2,7 +2,7 @@ use rocket::tokio::sync::broadcast::{Receiver, Sender};
 use serde_json::Map;
 
 use crate::{
-    component::Component,
+    component::{Component, GlobalComponent},
     event::{
         handle_data_log,
         states::{CounterEvent, ToggleEvent},
@@ -33,7 +33,6 @@ impl InternalCounter {
         let Event::Counter(counter_event) = &event.event else {
             return;
         };
-        eprintln!("process event {event:?}");
         use CounterEvent as E;
         self.value = match *counter_event {
             E::Increment => self.value + 1,
@@ -110,6 +109,7 @@ impl TeamFoulCounter {
                 continue;
             }
             self.counter.process_event(&log_event);
+
             let target = match self.component {
                 Component::Away(_) => Component::Away(TeamComponent::TeamFoulWarning),
                 Component::Home(_) => Component::Home(TeamComponent::TeamFoulWarning),

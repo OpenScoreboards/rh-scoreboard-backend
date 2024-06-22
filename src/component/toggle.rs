@@ -1,14 +1,25 @@
-use rocket::tokio::sync::broadcast::{Receiver, Sender};
+use std::time::Duration;
+
+use rocket::{
+    futures::FutureExt,
+    tokio::{
+        self,
+        sync::broadcast::{Receiver, Sender},
+        time::sleep,
+    },
+};
 use serde_json::Map;
 
 use crate::{
     component::Component,
     event::{
         handle_data_log,
-        states::{CounterEvent, ToggleEvent, ToggleState},
+        states::{ClockEvent, ToggleEvent, ToggleState},
         Event, LogEvent,
     },
 };
+
+use super::GlobalComponent;
 
 #[derive(Debug, Clone)]
 struct InteralToggle {
@@ -34,6 +45,9 @@ impl InteralToggle {
         let Event::Toggle(counter_event) = &event.event else {
             return;
         };
+        if matches!(event.component, Component::Global(GlobalComponent::Siren)) {
+            eprintln!("process event {event:?}");
+        }
         use ToggleEvent as E;
         self.state = match *counter_event {
             E::Activate => ToggleState::Active,
@@ -77,41 +91,38 @@ impl Toggle {
         }
     }
 }
+
 #[derive(Debug)]
-pub struct TeamFoulWarningToggle {
-    component: Component,
-    tf_component: Component,
+pub struct Siren {
     send: Sender<LogEvent>,
     receive: Receiver<LogEvent>,
-    toggle: InteralToggle,
+    state: InteralToggle,
 }
-impl TeamFoulWarningToggle {
-    pub fn new(
-        component: Component,
-        tf_component: Component,
-        name: &str,
-        send: Sender<LogEvent>,
-        receive: Receiver<LogEvent>,
-    ) -> Self {
+impl Siren {
+    pub fn new(send: Sender<LogEvent>, receive: Receiver<LogEvent>) -> Self {
         Self {
-            component,
-            tf_component,
             send,
             receive,
-            toggle: InteralToggle::new(name.into()),
+            state: InteralToggle::new("siren".into()),
         }
     }
     pub async fn run(mut self) {
         while let Ok(log_event) = self.receive.recv().await {
-            if handle_data_log(&log_event, self.component, &self.send, || {
-                self.toggle.get_data()
-            }) {
+            if handle_data_log(
+                &log_event,
+                Component::Global(GlobalComponent::Siren),
+                &self.send,
+                || self.state.get_data(),
+            ) {
                 continue;
             }
-            if log_event.component != self.component {
+            if !matches!(
+                log_event.component,
+                Component::Global(GlobalComponent::Siren)
+            ) {
                 continue;
             }
-            self.toggle.process_event(&log_event);
+            self.state.process_event(&log_event);
         }
     }
 }

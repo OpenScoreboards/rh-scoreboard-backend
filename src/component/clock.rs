@@ -3,19 +3,20 @@ use std::time::{Duration, Instant};
 use broadcast::Receiver;
 use event::{handle_data_log, states::ClockState, LogEvent};
 use rocket::serde::Serialize;
+use serde::Deserialize;
 
 use crate::*;
 
 use super::*;
 
-#[derive(Debug, Serialize)]
-struct ClockComponent {
-    #[serde(skip_serializing)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClockComponent {
+    #[serde(skip_serializing, default)]
     name: String,
-    state: ClockState,
+    pub state: ClockState,
     #[serde(with = "serde_millis")]
-    last_state_change: Instant,
-    last_time_remaining: Duration,
+    pub last_state_change: Instant,
+    pub last_time_remaining: Duration,
 }
 impl ClockComponent {
     fn new(name: String) -> Self {
@@ -46,6 +47,12 @@ impl ClockComponent {
             (S::Stopped, E::Start) => {
                 self.state = S::Running;
                 self.last_state_change = event.timestamp;
+            }
+            (_, E::Expired) => {
+                eprintln!("expire");
+                self.state = S::Stopped;
+                self.last_state_change = event.timestamp;
+                self.last_time_remaining = Duration::from_secs(0);
             }
             _ => {
                 eprintln!(
@@ -129,7 +136,7 @@ impl GameDependentClock {
                 log_event,
                 LogEvent {
                     component: Component::Global(GlobalComponent::GameClock),
-                    event: Event::Clock(ClockEvent::Start | ClockEvent::Stop),
+                    event: Event::Clock(ClockEvent::Start | ClockEvent::Stop | ClockEvent::Expired),
                     ..
                 }
             ) && log_event.component != self.component

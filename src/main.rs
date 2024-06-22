@@ -4,20 +4,25 @@ extern crate rocket;
 mod component;
 mod event;
 // mod scoreboard;
-use std::{sync::Mutex, time::Duration};
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use component::{
-    clock::{GameClock, GameDependentClock},
+    clock::{ClockComponent, GameClock, GameDependentClock},
     counter::{Counter, TeamFoulCounter},
-    toggle::Toggle,
+    toggle::{Siren, Toggle},
     Component, GlobalComponent, TeamComponent,
 };
-use event::states::{CounterEvent, ToggleEvent};
+use event::states::{ClockState, CounterEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
+    futures::future::Inspect,
     tokio::{
         self,
         sync::broadcast::{self, Sender},
+        time::sleep,
     },
     State,
 };
@@ -185,25 +190,7 @@ fn toggle_event_handler(
         .expect("message sent");
 }
 
-// #[post("/<target>/<counter_event>?<value>")]
-// fn counter_event(
-//     sender: &State<Sender<LogEvent>>,
-//     target: Component,
-//     mut counter_event: CounterEvent,
-//     value: Option<u64>,
-// ) {
-//     if !target.is_counter() {
-//         panic!("{target:?} is not a counter component");
-//     };
-//     if let (CounterEvent::Set(_), Some(val)) = (counter_event, value) {
-//         counter_event = CounterEvent::Set(val);
-//     }
-//     sender
-//         .send(LogEvent::new(target, Event::Counter(counter_event)))
-//         .expect("message sent");
-// }
-
-const DATA_OBJ_COUNT: usize = 6;
+const DATA_OBJ_COUNT: usize = 9;
 
 macro_rules! run_component {
     ($typ: ident, $component: expr, $name: expr, $send: expr $(,)?) => {
@@ -221,6 +208,66 @@ async fn rocket() -> _ {
 
     let game_clock = GameClock::new(send.clone(), send.subscribe());
     tokio::spawn(async move { game_clock.run().await });
+    let watcher = send.clone();
+    tokio::spawn(async move {
+        loop {
+            let mut recv = watcher.subscribe();
+            watcher
+                .send(LogEvent::new(
+                    Component::Global(GlobalComponent::GameClock),
+                    Event::DataLog(Value::Null),
+                ))
+                .unwrap();
+            loop {
+                let Ok(LogEvent {
+                    component: Component::Global(GlobalComponent::GameClock),
+                    event: Event::DataLog(data),
+                    ..
+                }) = recv.recv().await
+                else {
+                    continue;
+                };
+                let Some(game_clock_data) = data.get("game_clock") else {
+                    continue;
+                };
+                let Ok(clock_data): Result<ClockComponent, _> =
+                    serde_json::from_value(game_clock_data.clone())
+                else {
+                    continue;
+                };
+                if !matches!(clock_data.state, ClockState::Running) {
+                    continue;
+                }
+                let time_elapsed = Instant::now() - clock_data.last_state_change;
+                eprintln!("{time_elapsed:?}");
+                if time_elapsed > clock_data.last_time_remaining {
+                    watcher
+                        .send(LogEvent::new(
+                            Component::Global(GlobalComponent::GameClock),
+                            Event::Clock(ClockEvent::Expired),
+                        ))
+                        .unwrap();
+                    watcher
+                        .send(LogEvent::new(
+                            Component::Global(GlobalComponent::Siren),
+                            Event::Toggle(ToggleEvent::Activate),
+                        ))
+                        .unwrap();
+                    sleep(Duration::from_secs(2)).await;
+                    watcher
+                        .send(LogEvent::new(
+                            Component::Global(GlobalComponent::Siren),
+                            Event::Toggle(ToggleEvent::Deactivate),
+                        ))
+                        .unwrap();
+                    break;
+                }
+                sleep(Duration::from_millis(200)).await;
+            }
+        }
+    });
+    let siren = Siren::new(send.clone(), send.subscribe());
+    tokio::spawn(async move { siren.run().await });
 
     run_component!(
         GameDependentClock,
@@ -228,52 +275,23 @@ async fn rocket() -> _ {
         "shot_clock",
         send,
     );
-    // let shot_clock = GameDependentClock::new(
-    //     C::Global(GC::ShotClock),
-    //     "shot_clock",
-    //     send.clone(),
-    //     send.subscribe(),
-    // );
     run_component!(Counter, C::Home(TC::Score), "home_score", send);
-    // let home_score = Counter::new(
-    //     C::Home(TC::Score),
-    //     "home_score",
-    //     send.clone(),
-    //     send.subscribe(),
-    // );
     run_component!(Counter, C::Away(TC::Score), "away_score", send);
-    // let away_score = Counter::new(
-    //     C::Away(TC::Score),
-    //     "away_score",
-    //     send.clone(),
-    //     send.subscribe(),
-    // );
+
+    run_component!(TeamFoulCounter, C::Home(TC::TeamFouls), "home_tf", send);
+    run_component!(
+        Toggle,
+        C::Home(TC::TeamFoulWarning),
+        "home_team_foul_warning",
+        send
+    );
     run_component!(TeamFoulCounter, C::Away(TC::TeamFouls), "away_tf", send);
-    // let away_tf = TeamFoulCounter::new(
-    //     C::Away(TC::TeamFouls),
-    //     "away_tf",
-    //     send.clone(),
-    //     send.subscribe(),
-    // );
     run_component!(
         Toggle,
         C::Away(TC::TeamFoulWarning),
         "away_team_foul_warning",
         send
     );
-
-    // let away_tfw = Toggle::new(
-    //     C::Away(TC::TeamFoulWarning),
-    //     "away_team_foul_warning",
-    //     send.clone(),
-    //     send.subscribe(),
-    // );
-    // tokio::spawn(async move { game_clock.run().await });
-    // tokio::spawn(async move { shot_clock.run().await });
-    // tokio::spawn(async move { home_score.run().await });
-    // tokio::spawn(async move { away_score.run().await });
-    // tokio::spawn(async move { away_tf.run().await });
-    // tokio::spawn(async move { away_tfw.run().await });
 
     rocket::build()
         .manage(send)
