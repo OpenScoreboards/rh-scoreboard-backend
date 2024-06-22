@@ -5,52 +5,51 @@ use crate::{
     component::Component,
     event::{
         handle_data_log,
-        states::{CounterEvent, ToggleEvent},
+        states::{CounterEvent, ToggleEvent, ToggleState},
         Event, LogEvent,
     },
 };
 
-use super::TeamComponent;
-
 #[derive(Debug, Clone)]
-struct InternalCounter {
-    value: u64,
+struct InteralToggle {
+    state: ToggleState,
     name: String,
 }
-impl InternalCounter {
+impl InteralToggle {
     pub fn new(name: String) -> Self {
-        InternalCounter { value: 0, name }
+        InteralToggle {
+            state: ToggleState::Inactive,
+            name,
+        }
     }
     fn get_data(&self) -> serde_json::Value {
         let mut map = Map::default();
         map.insert(
             self.name.clone(),
-            serde_json::Value::Number(self.value.into()),
+            serde_json::Value::Bool(matches!(self.state, ToggleState::Active)),
         );
         serde_json::Value::Object(map)
     }
     fn process_event(&mut self, event: &LogEvent) {
-        let Event::Counter(counter_event) = &event.event else {
+        let Event::Toggle(counter_event) = &event.event else {
             return;
         };
-        eprintln!("process event {event:?}");
-        use CounterEvent as E;
-        self.value = match *counter_event {
-            E::Increment => self.value + 1,
-            E::Decrement => self.value.saturating_sub(1),
-            E::Set(value) => value,
+        use ToggleEvent as E;
+        self.state = match *counter_event {
+            E::Activate => ToggleState::Active,
+            E::Deactivate => ToggleState::Inactive,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Counter {
+pub struct Toggle {
     component: Component,
     send: Sender<LogEvent>,
     receive: Receiver<LogEvent>,
-    counter: InternalCounter,
+    toggle: InteralToggle,
 }
-impl Counter {
+impl Toggle {
     pub fn new(
         component: Component,
         name: &str,
@@ -61,68 +60,58 @@ impl Counter {
             component,
             send,
             receive,
-            counter: InternalCounter::new(name.into()),
+            toggle: InteralToggle::new(name.into()),
         }
     }
     pub async fn run(mut self) {
         while let Ok(log_event) = self.receive.recv().await {
             if handle_data_log(&log_event, self.component, &self.send, || {
-                self.counter.get_data()
+                self.toggle.get_data()
             }) {
                 continue;
             }
             if log_event.component != self.component {
                 continue;
             }
-            self.counter.process_event(&log_event);
+            self.toggle.process_event(&log_event);
         }
     }
 }
 #[derive(Debug)]
-pub struct TeamFoulCounter {
+pub struct TeamFoulWarningToggle {
     component: Component,
+    tf_component: Component,
     send: Sender<LogEvent>,
     receive: Receiver<LogEvent>,
-    counter: InternalCounter,
+    toggle: InteralToggle,
 }
-impl TeamFoulCounter {
+impl TeamFoulWarningToggle {
     pub fn new(
         component: Component,
+        tf_component: Component,
         name: &str,
         send: Sender<LogEvent>,
         receive: Receiver<LogEvent>,
     ) -> Self {
         Self {
             component,
+            tf_component,
             send,
             receive,
-            counter: InternalCounter::new(name.into()),
+            toggle: InteralToggle::new(name.into()),
         }
     }
     pub async fn run(mut self) {
         while let Ok(log_event) = self.receive.recv().await {
             if handle_data_log(&log_event, self.component, &self.send, || {
-                self.counter.get_data()
+                self.toggle.get_data()
             }) {
                 continue;
             }
             if log_event.component != self.component {
                 continue;
             }
-            self.counter.process_event(&log_event);
-            let target = match self.component {
-                Component::Away(_) => Component::Away(TeamComponent::TeamFoulWarning),
-                Component::Home(_) => Component::Home(TeamComponent::TeamFoulWarning),
-                _ => continue,
-            };
-            let value = if self.counter.value > 5 && (self.counter.value + 1) % 5 == 0 {
-                ToggleEvent::Activate
-            } else {
-                ToggleEvent::Deactivate
-            };
-            self.send
-                .send(LogEvent::new(target, Event::Toggle(value)))
-                .expect("message sent");
+            self.toggle.process_event(&log_event);
         }
     }
 }

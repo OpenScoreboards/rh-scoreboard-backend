@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use broadcast::Receiver;
-use event::{states::ClockState, EventListener, LogEvent};
+use event::{handle_data_log, states::ClockState, LogEvent};
 use rocket::serde::Serialize;
 
 use crate::*;
@@ -64,31 +64,32 @@ impl ClockComponent {
 
 #[derive(Debug)]
 pub struct GameClock {
-    send_receive: (Sender<LogEvent>, Receiver<LogEvent>),
+    send: Sender<LogEvent>,
+    receive: Receiver<LogEvent>,
     game_clock: ClockComponent,
 }
 impl GameClock {
-    pub fn new(send_receive: (Sender<LogEvent>, Receiver<LogEvent>)) -> Self {
+    pub fn new(send: Sender<LogEvent>, receive: Receiver<LogEvent>) -> Self {
         Self {
-            send_receive,
+            send,
+            receive,
             game_clock: ClockComponent::new("game_clock".into()),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.send_receive.1.recv().await {
+        while let Ok(log_event) = self.receive.recv().await {
             if matches!(log_event.event, Event::DataLog(serde_json::Value::Null)) {
-                self.send_receive
-                    .0
+                self.send
                     .send(LogEvent {
                         timestamp: Instant::now(),
                         log_id: Uuid::new_v4(),
-                        component: Component::GameClock,
+                        component: Component::Global(GlobalComponent::GameClock),
                         event: Event::DataLog(self.game_clock.get_data()),
                     })
                     .unwrap();
                 continue;
             }
-            if log_event.component != Component::GameClock {
+            if log_event.component != Component::Global(GlobalComponent::GameClock) {
                 continue;
             }
             self.game_clock.process_event(&log_event);
@@ -97,34 +98,45 @@ impl GameClock {
 }
 
 #[derive(Debug)]
-pub struct ShotClock {
+pub struct GameDependentClock {
+    component: Component,
     send: Sender<LogEvent>,
     receive: Receiver<LogEvent>,
-    shot_clock: ClockComponent,
+    clock: ClockComponent,
 }
-impl ShotClock {
-    pub fn new(send_receive: (Sender<LogEvent>, Receiver<LogEvent>)) -> Self {
+impl GameDependentClock {
+    pub fn new(
+        component: Component,
+        name: &str,
+        send: Sender<LogEvent>,
+        receive: Receiver<LogEvent>,
+    ) -> Self {
         Self {
-            send: send_receive.0,
-            receive: send_receive.1,
-            shot_clock: ClockComponent::new("shot_clock".into()),
+            component,
+            send,
+            receive,
+            clock: ClockComponent::new(name.into()),
         }
     }
     pub async fn run(mut self) {
         while let Ok(log_event) = self.receive.recv().await {
-            if matches!(log_event.event, Event::DataLog(serde_json::Value::Null)) {
-                self.send
-                    .send(LogEvent::new(
-                        Component::ShotClock,
-                        Event::DataLog(self.shot_clock.get_data()),
-                    ))
-                    .unwrap();
+            if handle_data_log(&log_event, self.component, &self.send, || {
+                self.clock.get_data()
+            }) {
                 continue;
             }
-            if log_event.component != Component::ShotClock {
+            if !matches!(
+                log_event,
+                LogEvent {
+                    component: Component::Global(GlobalComponent::GameClock),
+                    event: Event::Clock(ClockEvent::Start | ClockEvent::Stop),
+                    ..
+                }
+            ) && log_event.component != self.component
+            {
                 continue;
             }
-            self.shot_clock.process_event(&log_event);
+            self.clock.process_event(&log_event);
         }
     }
 }

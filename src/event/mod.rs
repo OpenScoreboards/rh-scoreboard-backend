@@ -2,6 +2,8 @@ pub mod states;
 
 use std::{fmt::Debug, time::Instant};
 
+use rocket::tokio::sync::broadcast::Sender;
+use serde_json::Value;
 use states::{ClockEvent, CounterEvent, ToggleEvent};
 use uuid::Uuid;
 
@@ -12,7 +14,7 @@ pub enum Event {
     DataLog(serde_json::Value),
     Clock(ClockEvent),
     Counter(CounterEvent),
-    ToggleEvent(ToggleEvent),
+    Toggle(ToggleEvent),
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,20 @@ impl LogEvent {
             event,
         }
     }
+}
+
+pub fn handle_data_log<T: Fn() -> Value>(
+    log_event: &LogEvent,
+    component: Component,
+    send: &Sender<LogEvent>,
+    get_data: T,
+) -> bool {
+    if matches!(log_event.event, Event::DataLog(serde_json::Value::Null)) {
+        send.send(LogEvent::new(component, Event::DataLog(get_data())))
+            .unwrap();
+        return true;
+    }
+    false
 }
 
 pub trait EventListener: Send + Sync + std::fmt::Debug {

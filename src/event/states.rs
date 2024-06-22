@@ -45,8 +45,15 @@ pub enum ToggleState {
     Inactive,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, EnumString)]
+#[strum(ascii_case_insensitive)]
 pub enum ToggleEvent {
     Activate,
     Deactivate,
+}
+impl<'a> FromParam<'a> for ToggleEvent {
+    type Error = ParseError;
+    fn from_param(param: &'a str) -> Result<Self, Self::Error> {
+        param.try_into()
+    }
 }
