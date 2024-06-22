@@ -19,6 +19,7 @@ use event::states::{ClockState, CounterEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
     fairing::{Fairing, Info, Kind},
+    futures::{SinkExt, StreamExt},
     http::Header,
     tokio::{
         self,
@@ -29,14 +30,14 @@ use rocket::{
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
+use ws::Message;
 
 #[get("/")]
 fn index() -> &'static str {
     "Hello, world!"
 }
 
-#[get("/data")]
-async fn data(sender: &State<Sender<LogEvent>>) -> String {
+async fn get_data(sender: &Sender<LogEvent>) -> String {
     let mut recv = sender.subscribe();
     sender
         .send(LogEvent::new(
@@ -58,6 +59,38 @@ async fn data(sender: &State<Sender<LogEvent>>) -> String {
         }
     }
     serde_json::Value::Object(data_map).to_string()
+}
+
+#[get("/data")]
+async fn data(sender: &State<Sender<LogEvent>>) -> String {
+    get_data(sender).await
+}
+
+#[get("/data_stream")]
+fn echo_stream(ws: ws::WebSocket, sender: &State<Sender<LogEvent>>) -> ws::Channel {
+    let mut recv = sender.subscribe();
+    // let b = ws.broadcaster();
+    ws.channel(move |mut stream| {
+        Box::pin(async move {
+            let mut last = Message::Text("".into());
+            loop {
+                let Ok(message) = recv.recv().await else {
+                    continue;
+                };
+                if matches!(message.event, Event::DataLog(_)) {
+                    continue;
+                }
+                let data = Message::Text(get_data(sender).await);
+                if data != last {
+                    last = data;
+                    stream
+                        .send(Message::Text(get_data(sender).await))
+                        .await
+                        .unwrap();
+                }
+            }
+        })
+    })
 }
 
 // Clocks
@@ -318,7 +351,7 @@ async fn rocket() -> _ {
         .attach(CORS)
         .manage(send)
         .manage(Mutex::new(receiver))
-        .mount("/", routes![index, data])
+        .mount("/", routes![index, data, echo_stream])
         .mount(
             "/clock/",
             routes![global_clock_event, home_clock_event, away_clock_event],

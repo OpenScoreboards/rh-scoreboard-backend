@@ -2,7 +2,7 @@ use rocket::tokio::sync::broadcast::{Receiver, Sender};
 use serde_json::Map;
 
 use crate::{
-    component::{Component, GlobalComponent},
+    component::Component,
     event::{
         handle_data_log,
         states::{CounterEvent, ToggleEvent},
@@ -115,14 +115,18 @@ impl TeamFoulCounter {
                 Component::Home(_) => Component::Home(TeamComponent::TeamFoulWarning),
                 _ => continue,
             };
-            let value = if self.counter.value > 5 && (self.counter.value + 1) % 5 == 0 {
-                ToggleEvent::Activate
-            } else {
-                ToggleEvent::Deactivate
+            if self.counter.value > 5 && (self.counter.value + 1) % 5 == 0 {
+                self.send
+                    .send(LogEvent::new(target, Event::Toggle(ToggleEvent::Activate)))
+                    .expect("message sent");
+            } else if self.counter.value > 5 && (self.counter.value) % 5 == 0 {
+                self.send
+                    .send(LogEvent::new(
+                        target,
+                        Event::Toggle(ToggleEvent::Deactivate),
+                    ))
+                    .expect("message sent");
             };
-            self.send
-                .send(LogEvent::new(target, Event::Toggle(value)))
-                .expect("message sent");
         }
     }
 }

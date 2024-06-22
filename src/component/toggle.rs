@@ -1,11 +1,7 @@
-use std::time::Duration;
 
 use rocket::{
-    futures::FutureExt,
     tokio::{
-        self,
         sync::broadcast::{Receiver, Sender},
-        time::sleep,
     },
 };
 use serde_json::Map;
@@ -14,7 +10,7 @@ use crate::{
     component::Component,
     event::{
         handle_data_log,
-        states::{ClockEvent, ToggleEvent, ToggleState},
+        states::{ToggleEvent, ToggleState},
         Event, LogEvent,
     },
 };
