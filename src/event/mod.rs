@@ -17,7 +17,6 @@ use crate::component::Component;
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    DataLog(serde_json::Value),
     Clock(ClockEvent),
     Counter(CounterEvent),
     Toggle(ToggleEvent),

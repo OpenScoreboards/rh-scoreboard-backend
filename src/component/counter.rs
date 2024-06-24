@@ -1,8 +1,5 @@
-use rocket::tokio::{
-    self,
-    sync::broadcast::{Sender},
-};
-use serde_json::{json, Map, Value};
+use rocket::tokio::{self, sync::broadcast::Sender};
+use serde_json::{json, Value};
 
 use crate::{
     component::Component,

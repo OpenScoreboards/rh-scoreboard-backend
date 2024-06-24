@@ -4,13 +4,10 @@ extern crate rocket;
 mod component;
 mod event;
 // mod scoreboard;
-use std::{
-    sync::Mutex,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use component::{
-    clock::{GameClock, GameDependentClock},
+    clock::{start_expiry_watcher, GameClock, GameDependentClock},
     counter::{Counter, TeamFoulCounter},
     toggle::{Siren, Toggle},
     Component, GlobalComponent, TeamComponent,
@@ -77,24 +74,18 @@ fn echo_stream<'a>(
                 return Ok(());
             }
             loop {
-                let message = match recv.recv().await {
-                    Ok(message) => message,
+                match recv.recv().await {
+                    Ok(_) => {}
                     e @ Err(RecvError::Closed) => {
                         eprintln!("{e:?}");
                         break;
                     }
                     _ => continue,
-                };
-                if matches!(message.event, Event::DataLog(_)) {
-                    continue;
                 }
                 let data = Message::Text(get_data(data_channels).await);
                 if data != last {
-                    last = data;
-                    if let e @ Err(_) = stream
-                        .send(Message::Text(get_data(data_channels).await))
-                        .await
-                    {
+                    last = data.clone();
+                    if let e @ Err(_) = stream.send(data).await {
                         eprintln!("{e:?}");
                         break;
                     };
@@ -275,13 +266,10 @@ impl Fairing for CORS {
     }
 }
 
-#[launch]
-async fn rocket() -> _ {
+fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>) {
     use Component as C;
     use GlobalComponent as GC;
     use TeamComponent as TC;
-    let (send, receiver) = broadcast::channel::<LogEvent>(32);
-    let mut data_channels = vec![];
 
     let (game_clock_data_channel, _) = broadcast::channel::<Value>(4);
     let (game_clock_typed_data_channel, _) =
@@ -294,56 +282,32 @@ async fn rocket() -> _ {
     tokio::spawn(async move { component.run().await });
     data_channels.push(game_clock_data_channel);
 
-    let watcher = send.clone();
-    tokio::spawn(async move {
-        let mut recv = game_clock_typed_data_channel.subscribe();
-        loop {
-            let _ = game_clock_typed_data_channel.send(None);
-            loop {
-                let Ok(Some((state, last_state_change, last_time_remaining))) = recv.recv().await
-                else {
-                    continue;
-                };
-                let ClockState::Running = state else {
-                    break;
-                };
-                let time_elapsed = Instant::now() - last_state_change;
-                if time_elapsed < last_time_remaining {
-                    break;
-                }
-                watcher
-                    .send(LogEvent::new(
-                        Component::Global(GlobalComponent::GameClock),
-                        Event::Clock(ClockEvent::Expired),
-                    ))
-                    .unwrap();
-                watcher
-                    .send(LogEvent::new(
-                        Component::Global(GlobalComponent::Siren),
-                        Event::Toggle(ToggleEvent::Activate),
-                    ))
-                    .unwrap();
-                sleep(Duration::from_secs(2)).await;
-                watcher
-                    .send(LogEvent::new(
-                        Component::Global(GlobalComponent::Siren),
-                        Event::Toggle(ToggleEvent::Deactivate),
-                    ))
-                    .unwrap();
-                break;
-            }
-            sleep(Duration::from_millis(200)).await;
-        }
-    });
+    start_expiry_watcher(
+        Component::Global(GC::GameClock),
+        true,
+        send.clone(),
+        game_clock_typed_data_channel,
+    );
     run_unique_component!(Siren, send, data_channels);
 
-    run_component!(
-        GameDependentClock,
+    let (shot_clock_data_channel, _) = broadcast::channel::<Value>(4);
+    let (shot_clock_typed_data_channel, _) =
+        broadcast::channel::<Option<(ClockState, Instant, Duration)>>(4);
+    let component = GameDependentClock::new(
         C::Global(GC::ShotClock),
         "shot_clock",
-        send,
-        data_channels,
+        send.clone(),
+        shot_clock_data_channel.clone(),
+        shot_clock_typed_data_channel.clone(),
     );
+    start_expiry_watcher(
+        Component::Global(GC::ShotClock),
+        false,
+        send.clone(),
+        shot_clock_typed_data_channel,
+    );
+    tokio::spawn(async move { component.run().await });
+    data_channels.push(shot_clock_data_channel);
     run_component!(
         Counter,
         C::Home(TC::Score),
@@ -359,7 +323,13 @@ async fn rocket() -> _ {
         data_channels,
     );
 
-    // run_component!(TeamFoulCounter, C::Home(TC::TeamFouls), "home_tf", send);
+    run_component!(
+        TeamFoulCounter,
+        C::Home(TC::TeamFouls),
+        "home_tf",
+        send,
+        data_channels
+    );
     run_component!(
         Toggle,
         C::Home(TC::TeamFoulWarning),
@@ -382,12 +352,19 @@ async fn rocket() -> _ {
         send,
         data_channels,
     );
+}
+
+#[launch]
+async fn rocket() -> _ {
+    let (send, _) = broadcast::channel::<LogEvent>(32);
+    let mut data_channels = vec![];
+
+    add_components(send.clone(), &mut data_channels);
 
     rocket::build()
         .attach(CORS)
         .manage(send)
         .manage(data_channels)
-        .manage(Mutex::new(receiver))
         .mount("/", routes![index, data, echo_stream])
         .mount(
             "/clock/",
@@ -401,5 +378,4 @@ async fn rocket() -> _ {
             "/toggle/",
             routes![global_toggle_event, home_toggle_event, away_toggle_event],
         )
-    // .mount("/counter/", routes![counter_event])
 }

@@ -132,12 +132,60 @@ impl GameClock {
     }
 }
 
+pub fn start_expiry_watcher(
+    component: Component,
+    activate_siren: bool,
+    event_sender: Sender<LogEvent>,
+    clock_data_sender: Sender<Option<(ClockState, Instant, Duration)>>,
+) {
+    tokio::spawn(async move {
+        let mut recv = clock_data_sender.subscribe();
+        loop {
+            let _ = clock_data_sender.send(None);
+            loop {
+                let Ok(Some((state, last_state_change, last_time_remaining))) = recv.recv().await
+                else {
+                    continue;
+                };
+                let ClockState::Running = state else {
+                    break;
+                };
+                let time_elapsed = Instant::now() - last_state_change;
+                if time_elapsed < last_time_remaining {
+                    break;
+                }
+                event_sender
+                    .send(LogEvent::new(component, Event::Clock(ClockEvent::Expired)))
+                    .unwrap();
+                if activate_siren {
+                    event_sender
+                        .send(LogEvent::new(
+                            Component::Global(GlobalComponent::Siren),
+                            Event::Toggle(ToggleEvent::Activate),
+                        ))
+                        .unwrap();
+                    sleep(Duration::from_secs(2)).await;
+                    event_sender
+                        .send(LogEvent::new(
+                            Component::Global(GlobalComponent::Siren),
+                            Event::Toggle(ToggleEvent::Deactivate),
+                        ))
+                        .unwrap();
+                }
+                break;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    });
+}
+
 #[derive(Debug)]
 pub struct GameDependentClock {
     component: Component,
     clock: Shareable<ClockComponent>,
     event_channel: MessageChannel<LogEvent>,
     data_channel: MessageChannel<Value>,
+    typed_data_channel: MessageChannel<Option<(ClockState, Instant, Duration)>>,
 }
 impl GameDependentClock {
     pub fn new(
@@ -145,12 +193,14 @@ impl GameDependentClock {
         name: &str,
         event_send: Sender<LogEvent>,
         data_log_send: Sender<Value>,
+        typed_data_send: Sender<Option<(ClockState, Instant, Duration)>>,
     ) -> Self {
         Self {
             component,
             clock: ClockComponent::new(name.into()).into(),
             event_channel: event_send.into(),
             data_channel: data_log_send.into(),
+            typed_data_channel: typed_data_send.into(),
         }
     }
     pub async fn run(mut self) {
@@ -168,6 +218,20 @@ impl GameDependentClock {
                         "state": &clock.state,
                     }
                 }));
+            }
+        });
+        let clock = self.clock.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(None) = self.typed_data_channel.recv().await else {
+                    continue;
+                };
+                let clock = clock.data.lock().unwrap();
+                let _ = self.typed_data_channel.send(Some((
+                    clock.state,
+                    clock.last_state_change,
+                    clock.last_time_remaining,
+                )));
             }
         });
         tokio::spawn(async move {
