@@ -1,12 +1,8 @@
-use std::{
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use event::{states::ClockState, LogEvent, MessageChannel, Shareable};
 use rocket::serde::Serialize;
-use serde::{
-    Deserialize,
-};
+use serde::Deserialize;
 use serde_json::{json, value::Serializer};
 use serde_millis::Milliseconds;
 
@@ -79,13 +75,19 @@ pub struct GameClock {
     clock: Shareable<ClockComponent>,
     event_channel: MessageChannel<LogEvent>,
     data_channel: MessageChannel<Value>,
+    typed_data_channel: MessageChannel<Option<(ClockState, Instant, Duration)>>,
 }
 impl GameClock {
-    pub fn new(event_send: Sender<LogEvent>, data_log_send: Sender<Value>) -> Self {
+    pub fn new(
+        event_send: Sender<LogEvent>,
+        data_log_send: Sender<Value>,
+        typed_data_send: Sender<Option<(ClockState, Instant, Duration)>>,
+    ) -> Self {
         Self {
             clock: ClockComponent::new("game_clock".into()).into(),
             event_channel: event_send.into(),
             data_channel: data_log_send.into(),
+            typed_data_channel: typed_data_send.into(),
         }
     }
     pub async fn run(mut self) {
@@ -103,6 +105,20 @@ impl GameClock {
                         "state": &clock.state,
                     }
                 }));
+            }
+        });
+        let clock = self.clock.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(None) = self.typed_data_channel.recv().await else {
+                    continue;
+                };
+                let clock = clock.data.lock().unwrap();
+                let _ = self.typed_data_channel.send(Some((
+                    clock.state,
+                    clock.last_state_change,
+                    clock.last_time_remaining,
+                )));
             }
         });
         tokio::spawn(async move {

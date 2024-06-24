@@ -5,12 +5,12 @@ mod component;
 mod event;
 // mod scoreboard;
 use std::{
-    sync::{Mutex},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
 use component::{
-    clock::{ClockComponent, GameClock, GameDependentClock},
+    clock::{GameClock, GameDependentClock},
     counter::{Counter, TeamFoulCounter},
     toggle::{Siren, Toggle},
     Component, GlobalComponent, TeamComponent,
@@ -19,7 +19,7 @@ use event::states::{ClockState, CounterEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
     fairing::{Fairing, Info, Kind},
-    futures::{SinkExt, StreamExt},
+    futures::SinkExt,
     http::Header,
     tokio::{
         self,
@@ -37,26 +37,7 @@ fn index() -> &'static str {
 }
 
 async fn get_data(sender: &State<Vec<Sender<Value>>>) -> String {
-    // let mut recv = sender.subscribe();
-    // sender
-    //     .send(LogEvent::new(
-    //         Component::Global(GlobalComponent::GameClock),
-    //         Event::DataLog(Value::Null),
-    //     ))
-    //     .unwrap();
     let mut data_map = Map::<String, Value>::default();
-    // let mut components_received = vec![];
-    // while components_received.len() < DATA_OBJ_COUNT {
-    //     let Ok(log_event) = recv.recv().await else {
-    //         continue;
-    //     };
-    //     if !components_received.contains(&log_event.component) {
-    //         if let Event::DataLog(Value::Object(map)) = log_event.event {
-    //             components_received.push(log_event.component);
-    //             data_map.extend(map.into_iter())
-    //         }
-    //     }
-    // }
     for channel in sender.iter() {
         let mut recv = channel.subscribe();
         channel.send(Value::Null).expect("data channel closed");
@@ -107,11 +88,9 @@ fn echo_stream<'a>(
                 if matches!(message.event, Event::DataLog(_)) {
                     continue;
                 }
-                eprintln!("ws loop");
                 let data = Message::Text(get_data(data_channels).await);
                 if data != last {
                     last = data;
-                    eprintln!("writing to data_stream");
                     if let e @ Err(_) = stream
                         .send(Message::Text(get_data(data_channels).await))
                         .await
@@ -121,7 +100,6 @@ fn echo_stream<'a>(
                     };
                 }
             }
-            eprintln!("break ws");
             Ok(())
         })
     })
@@ -259,12 +237,13 @@ fn toggle_event_handler(
 }
 
 macro_rules! run_unique_component {
-    ($typ: ident, $send: expr, $data_channels: expr $(,)?) => {
+    ($typ: ident, $send: expr, $data_channels: expr $(,)?) => {{
         let (data_channel, _) = broadcast::channel::<Value>(4);
         let component = $typ::new($send.clone(), data_channel.clone());
         tokio::spawn(async move { component.run().await });
-        $data_channels.push(data_channel);
-    };
+        $data_channels.push(data_channel.clone());
+        data_channel
+    }};
 }
 macro_rules! run_component {
     ($typ: ident, $component: expr, $name: expr, $send: expr, $data_channels: expr $(,)?) => {
@@ -304,63 +283,53 @@ async fn rocket() -> _ {
     let (send, receiver) = broadcast::channel::<LogEvent>(32);
     let mut data_channels = vec![];
 
-    run_unique_component!(GameClock, send, data_channels);
+    let (game_clock_data_channel, _) = broadcast::channel::<Value>(4);
+    let (game_clock_typed_data_channel, _) =
+        broadcast::channel::<Option<(ClockState, Instant, Duration)>>(4);
+    let component = GameClock::new(
+        send.clone(),
+        game_clock_data_channel.clone(),
+        game_clock_typed_data_channel.clone(),
+    );
+    tokio::spawn(async move { component.run().await });
+    data_channels.push(game_clock_data_channel);
 
     let watcher = send.clone();
-    // TODO: refactor
     tokio::spawn(async move {
+        let mut recv = game_clock_typed_data_channel.subscribe();
         loop {
-            let mut recv = watcher.subscribe();
-            watcher
-                .send(LogEvent::new(
-                    Component::Global(GlobalComponent::GameClock),
-                    Event::DataLog(Value::Null),
-                ))
-                .unwrap();
+            let _ = game_clock_typed_data_channel.send(None);
             loop {
-                let Ok(LogEvent {
-                    component: Component::Global(GlobalComponent::GameClock),
-                    event: Event::DataLog(data),
-                    ..
-                }) = recv.recv().await
+                let Ok(Some((state, last_state_change, last_time_remaining))) = recv.recv().await
                 else {
                     continue;
                 };
-                let Some(game_clock_data) = data.get("game_clock") else {
-                    continue;
+                let ClockState::Running = state else {
+                    break;
                 };
-                let Ok(clock_data): Result<ClockComponent, _> =
-                    serde_json::from_value(game_clock_data.clone())
-                else {
-                    continue;
-                };
-                if !matches!(clock_data.state, ClockState::Running) {
-                    continue;
+                let time_elapsed = Instant::now() - last_state_change;
+                if time_elapsed < last_time_remaining {
+                    break;
                 }
-                eprintln!("running");
-                let time_elapsed = Instant::now() - clock_data.last_state_change;
-                if time_elapsed > clock_data.last_time_remaining {
-                    eprintln!("expired");
-                    watcher
-                        .send(LogEvent::new(
-                            Component::Global(GlobalComponent::GameClock),
-                            Event::Clock(ClockEvent::Expired),
-                        ))
-                        .unwrap();
-                    watcher
-                        .send(LogEvent::new(
-                            Component::Global(GlobalComponent::Siren),
-                            Event::Toggle(ToggleEvent::Activate),
-                        ))
-                        .unwrap();
-                    sleep(Duration::from_secs(2)).await;
-                    watcher
-                        .send(LogEvent::new(
-                            Component::Global(GlobalComponent::Siren),
-                            Event::Toggle(ToggleEvent::Deactivate),
-                        ))
-                        .unwrap();
-                }
+                watcher
+                    .send(LogEvent::new(
+                        Component::Global(GlobalComponent::GameClock),
+                        Event::Clock(ClockEvent::Expired),
+                    ))
+                    .unwrap();
+                watcher
+                    .send(LogEvent::new(
+                        Component::Global(GlobalComponent::Siren),
+                        Event::Toggle(ToggleEvent::Activate),
+                    ))
+                    .unwrap();
+                sleep(Duration::from_secs(2)).await;
+                watcher
+                    .send(LogEvent::new(
+                        Component::Global(GlobalComponent::Siren),
+                        Event::Toggle(ToggleEvent::Deactivate),
+                    ))
+                    .unwrap();
                 break;
             }
             sleep(Duration::from_millis(200)).await;
