@@ -5,7 +5,7 @@ mod component;
 mod event;
 // mod scoreboard;
 use std::{
-    sync::Mutex,
+    sync::{Mutex},
     time::{Duration, Instant},
 };
 
@@ -29,7 +29,6 @@ use rocket::{
     Request, Response, State,
 };
 use serde_json::{Map, Value};
-use uuid::Uuid;
 use ws::Message;
 
 #[get("/")]
@@ -37,42 +36,61 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-async fn get_data(sender: &Sender<LogEvent>) -> String {
-    let mut recv = sender.subscribe();
-    sender
-        .send(LogEvent::new(
-            Component::Global(GlobalComponent::GameClock),
-            Event::DataLog(Value::Null),
-        ))
-        .unwrap();
+async fn get_data(sender: &State<Vec<Sender<Value>>>) -> String {
+    // let mut recv = sender.subscribe();
+    // sender
+    //     .send(LogEvent::new(
+    //         Component::Global(GlobalComponent::GameClock),
+    //         Event::DataLog(Value::Null),
+    //     ))
+    //     .unwrap();
     let mut data_map = Map::<String, Value>::default();
-    let mut components_received = vec![];
-    while components_received.len() < DATA_OBJ_COUNT {
-        let Ok(log_event) = recv.recv().await else {
-            continue;
-        };
-        if !components_received.contains(&log_event.component) {
-            if let Event::DataLog(Value::Object(map)) = log_event.event {
-                components_received.push(log_event.component);
-                data_map.extend(map.into_iter())
+    // let mut components_received = vec![];
+    // while components_received.len() < DATA_OBJ_COUNT {
+    //     let Ok(log_event) = recv.recv().await else {
+    //         continue;
+    //     };
+    //     if !components_received.contains(&log_event.component) {
+    //         if let Event::DataLog(Value::Object(map)) = log_event.event {
+    //             components_received.push(log_event.component);
+    //             data_map.extend(map.into_iter())
+    //         }
+    //     }
+    // }
+    for channel in sender.iter() {
+        let mut recv = channel.subscribe();
+        channel.send(Value::Null).expect("data channel closed");
+
+        let message = loop {
+            let message = recv.recv().await.expect("data message not received");
+            match message {
+                Value::Null => continue,
+                message => break message,
             }
-        }
+        };
+        let Value::Object(data) = message else {
+            panic!("object data not received, go {message:?}");
+        };
+        data_map.extend(data.into_iter());
     }
     serde_json::Value::Object(data_map).to_string()
 }
 
 #[get("/data")]
-async fn data(sender: &State<Sender<LogEvent>>) -> String {
+async fn data(sender: &State<Vec<Sender<Value>>>) -> String {
     get_data(sender).await
 }
 
 #[get("/data_stream")]
-fn echo_stream(ws: ws::WebSocket, sender: &State<Sender<LogEvent>>) -> ws::Channel {
-    let mut recv = sender.subscribe();
-    // let b = ws.broadcaster();
+fn echo_stream<'a>(
+    ws: ws::WebSocket,
+    event_channel: &'a State<Sender<LogEvent>>,
+    data_channels: &'a State<Vec<Sender<Value>>>,
+) -> ws::Channel<'a> {
+    let mut recv = event_channel.subscribe();
     ws.channel(move |mut stream| {
         Box::pin(async move {
-            let mut last = Message::Text(get_data(sender).await);
+            let mut last = Message::Text(get_data(data_channels).await);
             if let e @ Err(_) = stream.send(last.clone()).await {
                 eprintln!("{e:?}");
                 return Ok(());
@@ -89,11 +107,15 @@ fn echo_stream(ws: ws::WebSocket, sender: &State<Sender<LogEvent>>) -> ws::Chann
                 if matches!(message.event, Event::DataLog(_)) {
                     continue;
                 }
-                let data = Message::Text(get_data(sender).await);
+                eprintln!("ws loop");
+                let data = Message::Text(get_data(data_channels).await);
                 if data != last {
                     last = data;
                     eprintln!("writing to data_stream");
-                    if let e @ Err(_) = stream.send(Message::Text(get_data(sender).await)).await {
+                    if let e @ Err(_) = stream
+                        .send(Message::Text(get_data(data_channels).await))
+                        .await
+                    {
                         eprintln!("{e:?}");
                         break;
                     };
@@ -236,12 +258,20 @@ fn toggle_event_handler(
         .expect("message sent");
 }
 
-const DATA_OBJ_COUNT: usize = 9;
-
-macro_rules! run_component {
-    ($typ: ident, $component: expr, $name: expr, $send: expr $(,)?) => {
-        let component = $typ::new($component, $name, $send.clone(), $send.subscribe());
+macro_rules! run_unique_component {
+    ($typ: ident, $send: expr, $data_channels: expr $(,)?) => {
+        let (data_channel, _) = broadcast::channel::<Value>(4);
+        let component = $typ::new($send.clone(), data_channel.clone());
         tokio::spawn(async move { component.run().await });
+        $data_channels.push(data_channel);
+    };
+}
+macro_rules! run_component {
+    ($typ: ident, $component: expr, $name: expr, $send: expr, $data_channels: expr $(,)?) => {
+        let (data_channel, _) = broadcast::channel::<Value>(4);
+        let component = $typ::new($component, $name, $send.clone(), data_channel.clone());
+        tokio::spawn(async move { component.run().await });
+        $data_channels.push(data_channel);
     };
 }
 pub struct CORS;
@@ -272,10 +302,12 @@ async fn rocket() -> _ {
     use GlobalComponent as GC;
     use TeamComponent as TC;
     let (send, receiver) = broadcast::channel::<LogEvent>(32);
+    let mut data_channels = vec![];
 
-    let game_clock = GameClock::new(send.clone(), send.subscribe());
-    tokio::spawn(async move { game_clock.run().await });
+    run_unique_component!(GameClock, send, data_channels);
+
     let watcher = send.clone();
+    // TODO: refactor
     tokio::spawn(async move {
         loop {
             let mut recv = watcher.subscribe();
@@ -305,8 +337,10 @@ async fn rocket() -> _ {
                 if !matches!(clock_data.state, ClockState::Running) {
                     continue;
                 }
+                eprintln!("running");
                 let time_elapsed = Instant::now() - clock_data.last_state_change;
                 if time_elapsed > clock_data.last_time_remaining {
+                    eprintln!("expired");
                     watcher
                         .send(LogEvent::new(
                             Component::Global(GlobalComponent::GameClock),
@@ -326,42 +360,64 @@ async fn rocket() -> _ {
                             Event::Toggle(ToggleEvent::Deactivate),
                         ))
                         .unwrap();
-                    break;
                 }
-                sleep(Duration::from_millis(200)).await;
+                break;
             }
+            sleep(Duration::from_millis(200)).await;
         }
     });
-    let siren = Siren::new(send.clone(), send.subscribe());
-    tokio::spawn(async move { siren.run().await });
+    run_unique_component!(Siren, send, data_channels);
 
     run_component!(
         GameDependentClock,
         C::Global(GC::ShotClock),
         "shot_clock",
         send,
+        data_channels,
     );
-    run_component!(Counter, C::Home(TC::Score), "home_score", send);
-    run_component!(Counter, C::Away(TC::Score), "away_score", send);
+    run_component!(
+        Counter,
+        C::Home(TC::Score),
+        "home_score",
+        send,
+        data_channels,
+    );
+    run_component!(
+        Counter,
+        C::Away(TC::Score),
+        "away_score",
+        send,
+        data_channels,
+    );
 
-    run_component!(TeamFoulCounter, C::Home(TC::TeamFouls), "home_tf", send);
+    // run_component!(TeamFoulCounter, C::Home(TC::TeamFouls), "home_tf", send);
     run_component!(
         Toggle,
         C::Home(TC::TeamFoulWarning),
         "home_team_foul_warning",
-        send
+        send,
+        data_channels,
     );
-    run_component!(TeamFoulCounter, C::Away(TC::TeamFouls), "away_tf", send);
+    run_component!(
+        TeamFoulCounter,
+        C::Away(TC::TeamFouls),
+        "away_tf",
+        send,
+        data_channels,
+    );
+
     run_component!(
         Toggle,
         C::Away(TC::TeamFoulWarning),
         "away_team_foul_warning",
-        send
+        send,
+        data_channels,
     );
 
     rocket::build()
         .attach(CORS)
         .manage(send)
+        .manage(data_channels)
         .manage(Mutex::new(receiver))
         .mount("/", routes![index, data, echo_stream])
         .mount(

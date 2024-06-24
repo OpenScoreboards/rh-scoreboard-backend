@@ -1,17 +1,11 @@
-
-use rocket::{
-    tokio::{
-        sync::broadcast::{Receiver, Sender},
-    },
-};
-use serde_json::Map;
+use rocket::tokio::{self, sync::broadcast::Sender};
+use serde_json::{json, Map, Value};
 
 use crate::{
     component::Component,
     event::{
-        handle_data_log,
         states::{ToggleEvent, ToggleState},
-        Event, LogEvent,
+        Event, LogEvent, MessageChannel, Shareable,
     },
 };
 
@@ -29,14 +23,6 @@ impl InteralToggle {
             name,
         }
     }
-    fn get_data(&self) -> serde_json::Value {
-        let mut map = Map::default();
-        map.insert(
-            self.name.clone(),
-            serde_json::Value::Bool(matches!(self.state, ToggleState::Active)),
-        );
-        serde_json::Value::Object(map)
-    }
     fn process_event(&mut self, event: &LogEvent) {
         let Event::Toggle(counter_event) = &event.event else {
             return;
@@ -52,70 +38,85 @@ impl InteralToggle {
 #[derive(Debug)]
 pub struct Toggle {
     component: Component,
-    send: Sender<LogEvent>,
-    receive: Receiver<LogEvent>,
-    toggle: InteralToggle,
+    toggle: Shareable<InteralToggle>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
 }
 impl Toggle {
     pub fn new(
         component: Component,
         name: &str,
-        send: Sender<LogEvent>,
-        receive: Receiver<LogEvent>,
+        event_send: Sender<LogEvent>,
+        data_log_send: Sender<Value>,
     ) -> Self {
         Self {
             component,
-            send,
-            receive,
-            toggle: InteralToggle::new(name.into()),
+            toggle: InteralToggle::new(name.into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.receive.recv().await {
-            if handle_data_log(&log_event, self.component, &self.send, || {
-                self.toggle.get_data()
-            }) {
-                continue;
+        let toggle = self.toggle.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(Value::Null) = self.data_channel.recv().await else {
+                    continue;
+                };
+                let toggle = toggle.data.lock().unwrap();
+                let _ = self.data_channel.send(json!({
+                    &toggle.name: matches!(toggle.state, ToggleState::Active)
+                }));
             }
-            if log_event.component != self.component {
-                continue;
+        });
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if log_event.component != self.component {
+                    continue;
+                }
+                self.toggle.data.lock().unwrap().process_event(&log_event);
             }
-            self.toggle.process_event(&log_event);
-        }
+        });
     }
 }
 
 #[derive(Debug)]
 pub struct Siren {
-    send: Sender<LogEvent>,
-    receive: Receiver<LogEvent>,
-    state: InteralToggle,
+    state: Shareable<InteralToggle>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
 }
 impl Siren {
-    pub fn new(send: Sender<LogEvent>, receive: Receiver<LogEvent>) -> Self {
+    pub fn new(event_send: Sender<LogEvent>, data_log_send: Sender<Value>) -> Self {
         Self {
-            send,
-            receive,
-            state: InteralToggle::new("siren".into()),
+            state: InteralToggle::new("siren".into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.receive.recv().await {
-            if handle_data_log(
-                &log_event,
-                Component::Global(GlobalComponent::Siren),
-                &self.send,
-                || self.state.get_data(),
-            ) {
-                continue;
+        let toggle = self.state.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(Value::Null) = self.data_channel.recv().await else {
+                    continue;
+                };
+                let toggle = toggle.data.lock().unwrap();
+                let _ = self.data_channel.send(json!({
+                    &toggle.name: matches!(toggle.state, ToggleState::Active)
+                }));
             }
-            if !matches!(
-                log_event.component,
-                Component::Global(GlobalComponent::Siren)
-            ) {
-                continue;
+        });
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if !matches!(
+                    log_event.component,
+                    Component::Global(GlobalComponent::Siren)
+                ) {
+                    continue;
+                }
+                self.state.data.lock().unwrap().process_event(&log_event);
             }
-            self.state.process_event(&log_event);
-        }
+        });
     }
 }

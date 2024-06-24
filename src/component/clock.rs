@@ -1,15 +1,20 @@
-use std::time::{Duration, Instant};
+use std::{
+    time::{Duration, Instant},
+};
 
-use broadcast::Receiver;
-use event::{handle_data_log, states::ClockState, LogEvent};
+use event::{states::ClockState, LogEvent, MessageChannel, Shareable};
 use rocket::serde::Serialize;
-use serde::Deserialize;
+use serde::{
+    Deserialize,
+};
+use serde_json::{json, value::Serializer};
+use serde_millis::Milliseconds;
 
 use crate::*;
 
 use super::*;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClockComponent {
     #[serde(skip_serializing, default)]
     name: String,
@@ -63,88 +68,109 @@ impl ClockComponent {
             }
         }
     }
-    fn get_data(&self) -> serde_json::Value {
-        let mut map = Map::default();
-        map.insert(self.name.clone(), serde_json::to_value(self).unwrap());
-        serde_json::Value::Object(map)
-    }
+}
+
+fn to_json_value<T: Milliseconds>(value: &T) -> Value {
+    serde_millis::serialize(value, Serializer).expect("failed to serialize to milliseconds")
 }
 
 #[derive(Debug)]
 pub struct GameClock {
-    send: Sender<LogEvent>,
-    receive: Receiver<LogEvent>,
-    game_clock: ClockComponent,
+    clock: Shareable<ClockComponent>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
 }
 impl GameClock {
-    pub fn new(send: Sender<LogEvent>, receive: Receiver<LogEvent>) -> Self {
+    pub fn new(event_send: Sender<LogEvent>, data_log_send: Sender<Value>) -> Self {
         Self {
-            send,
-            receive,
-            game_clock: ClockComponent::new("game_clock".into()),
+            clock: ClockComponent::new("game_clock".into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.receive.recv().await {
-            if matches!(log_event.event, Event::DataLog(serde_json::Value::Null)) {
-                self.send
-                    .send(LogEvent {
-                        timestamp: Instant::now(),
-                        log_id: Uuid::new_v4(),
-                        component: Component::Global(GlobalComponent::GameClock),
-                        event: Event::DataLog(self.game_clock.get_data()),
-                    })
-                    .unwrap();
-                continue;
+        let clock = self.clock.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(Value::Null) = self.data_channel.recv().await else {
+                    continue;
+                };
+                let clock = clock.data.lock().unwrap();
+                let _ = self.data_channel.send(json!({
+                    &clock.name: {
+                        "last_time_remaining": to_json_value(&clock.last_time_remaining),
+                        "last_state_change": to_json_value(&clock.last_state_change),
+                        "state": &clock.state,
+                    }
+                }));
             }
-            if log_event.component != Component::Global(GlobalComponent::GameClock) {
-                continue;
+        });
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if log_event.component != Component::Global(GlobalComponent::GameClock) {
+                    continue;
+                }
+                self.clock.data.lock().unwrap().process_event(&log_event);
             }
-            self.game_clock.process_event(&log_event);
-        }
+        });
     }
 }
 
 #[derive(Debug)]
 pub struct GameDependentClock {
     component: Component,
-    send: Sender<LogEvent>,
-    receive: Receiver<LogEvent>,
-    clock: ClockComponent,
+    clock: Shareable<ClockComponent>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
 }
 impl GameDependentClock {
     pub fn new(
         component: Component,
         name: &str,
-        send: Sender<LogEvent>,
-        receive: Receiver<LogEvent>,
+        event_send: Sender<LogEvent>,
+        data_log_send: Sender<Value>,
     ) -> Self {
         Self {
             component,
-            send,
-            receive,
-            clock: ClockComponent::new(name.into()),
+            clock: ClockComponent::new(name.into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.receive.recv().await {
-            if handle_data_log(&log_event, self.component, &self.send, || {
-                self.clock.get_data()
-            }) {
-                continue;
+        let clock = self.clock.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(Value::Null) = self.data_channel.recv().await else {
+                    continue;
+                };
+                let clock = clock.data.lock().unwrap();
+                let _ = self.data_channel.send(json!({
+                    &clock.name: {
+                        "last_time_remaining": to_json_value(&clock.last_time_remaining),
+                        "last_state_change": to_json_value(&clock.last_state_change),
+                        "state": &clock.state,
+                    }
+                }));
             }
-            if !matches!(
-                log_event,
-                LogEvent {
-                    component: Component::Global(GlobalComponent::GameClock),
-                    event: Event::Clock(ClockEvent::Start | ClockEvent::Stop | ClockEvent::Expired),
-                    ..
+        });
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if !matches!(
+                    log_event,
+                    LogEvent {
+                        component: Component::Global(GlobalComponent::GameClock),
+                        event: Event::Clock(
+                            ClockEvent::Start | ClockEvent::Stop | ClockEvent::Expired
+                        ),
+                        ..
+                    }
+                ) && log_event.component != self.component
+                {
+                    continue;
                 }
-            ) && log_event.component != self.component
-            {
-                continue;
+                self.clock.data.lock().unwrap().process_event(&log_event);
             }
-            self.clock.process_event(&log_event);
-        }
+        });
     }
 }

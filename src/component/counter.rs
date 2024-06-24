@@ -1,12 +1,14 @@
-use rocket::tokio::sync::broadcast::{Receiver, Sender};
-use serde_json::Map;
+use rocket::tokio::{
+    self,
+    sync::broadcast::{Sender},
+};
+use serde_json::{json, Map, Value};
 
 use crate::{
     component::Component,
     event::{
-        handle_data_log,
         states::{CounterEvent, ToggleEvent},
-        Event, LogEvent,
+        Event, LogEvent, MessageChannel, Shareable,
     },
 };
 
@@ -20,14 +22,6 @@ struct InternalCounter {
 impl InternalCounter {
     pub fn new(name: String) -> Self {
         InternalCounter { value: 0, name }
-    }
-    fn get_data(&self) -> serde_json::Value {
-        let mut map = Map::default();
-        map.insert(
-            self.name.clone(),
-            serde_json::Value::Number(self.value.into()),
-        );
-        serde_json::Value::Object(map)
     }
     fn process_event(&mut self, event: &LogEvent) {
         let Event::Counter(counter_event) = &event.event else {
@@ -45,88 +39,107 @@ impl InternalCounter {
 #[derive(Debug)]
 pub struct Counter {
     component: Component,
-    send: Sender<LogEvent>,
-    receive: Receiver<LogEvent>,
-    counter: InternalCounter,
+    counter: Shareable<InternalCounter>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
 }
 impl Counter {
     pub fn new(
         component: Component,
         name: &str,
-        send: Sender<LogEvent>,
-        receive: Receiver<LogEvent>,
+        event_send: Sender<LogEvent>,
+        data_log_send: Sender<Value>,
     ) -> Self {
         Self {
             component,
-            send,
-            receive,
-            counter: InternalCounter::new(name.into()),
+            counter: InternalCounter::new(name.into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.receive.recv().await {
-            if handle_data_log(&log_event, self.component, &self.send, || {
-                self.counter.get_data()
-            }) {
-                continue;
+        let counter = self.counter.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(Value::Null) = self.data_channel.recv().await else {
+                    continue;
+                };
+                let counter = counter.data.lock().unwrap();
+                let _ = self
+                    .data_channel
+                    .send(json!({ counter.name.clone(): counter.value.clone() }));
             }
-            if log_event.component != self.component {
-                continue;
+        });
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if log_event.component != self.component {
+                    continue;
+                }
+                self.counter.data.lock().unwrap().process_event(&log_event);
             }
-            self.counter.process_event(&log_event);
-        }
+        });
     }
 }
 #[derive(Debug)]
 pub struct TeamFoulCounter {
     component: Component,
-    send: Sender<LogEvent>,
-    receive: Receiver<LogEvent>,
-    counter: InternalCounter,
+    counter: Shareable<InternalCounter>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
 }
 impl TeamFoulCounter {
     pub fn new(
         component: Component,
         name: &str,
-        send: Sender<LogEvent>,
-        receive: Receiver<LogEvent>,
+        event_send: Sender<LogEvent>,
+        data_log_send: Sender<Value>,
     ) -> Self {
         Self {
             component,
-            send,
-            receive,
-            counter: InternalCounter::new(name.into()),
+            counter: InternalCounter::new(name.into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
         }
     }
     pub async fn run(mut self) {
-        while let Ok(log_event) = self.receive.recv().await {
-            if handle_data_log(&log_event, self.component, &self.send, || {
-                self.counter.get_data()
-            }) {
-                continue;
+        let counter = self.counter.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok(Value::Null) = self.data_channel.recv().await else {
+                    continue;
+                };
+                let counter = counter.data.lock().unwrap();
+                let _ = self
+                    .data_channel
+                    .send(json!({ &counter.name: counter.value }));
             }
-            if log_event.component != self.component {
-                continue;
-            }
-            self.counter.process_event(&log_event);
+        });
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if log_event.component != self.component {
+                    continue;
+                }
+                let mut counter = self.counter.data.lock().unwrap();
+                counter.process_event(&log_event);
 
-            let target = match self.component {
-                Component::Away(_) => Component::Away(TeamComponent::TeamFoulWarning),
-                Component::Home(_) => Component::Home(TeamComponent::TeamFoulWarning),
-                _ => continue,
-            };
-            if self.counter.value > 5 && (self.counter.value + 1) % 5 == 0 {
-                self.send
-                    .send(LogEvent::new(target, Event::Toggle(ToggleEvent::Activate)))
-                    .expect("message sent");
-            } else if self.counter.value > 5 && (self.counter.value) % 5 == 0 {
-                self.send
-                    .send(LogEvent::new(
-                        target,
-                        Event::Toggle(ToggleEvent::Deactivate),
-                    ))
-                    .expect("message sent");
-            };
-        }
+                let target = match self.component {
+                    Component::Away(_) => Component::Away(TeamComponent::TeamFoulWarning),
+                    Component::Home(_) => Component::Home(TeamComponent::TeamFoulWarning),
+                    _ => continue,
+                };
+                if counter.value > 5 && (counter.value + 1) % 5 == 0 {
+                    self.event_channel
+                        .send(LogEvent::new(target, Event::Toggle(ToggleEvent::Activate)))
+                        .expect("message sent");
+                } else if counter.value > 5 && (counter.value) % 5 == 0 {
+                    self.event_channel
+                        .send(LogEvent::new(
+                            target,
+                            Event::Toggle(ToggleEvent::Deactivate),
+                        ))
+                        .expect("message sent");
+                };
+            }
+        });
     }
 }

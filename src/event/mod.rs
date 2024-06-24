@@ -1,9 +1,15 @@
 pub mod states;
 
-use std::{fmt::Debug, time::Instant};
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
-use rocket::tokio::sync::broadcast::Sender;
-use serde_json::Value;
+use rocket::tokio::sync::broadcast::{
+    error::{RecvError, SendError},
+    Receiver, Sender,
+};
 use states::{ClockEvent, CounterEvent, ToggleEvent};
 use uuid::Uuid;
 
@@ -35,16 +41,36 @@ impl LogEvent {
     }
 }
 
-pub fn handle_data_log<T: Fn() -> Value>(
-    log_event: &LogEvent,
-    component: Component,
-    send: &Sender<LogEvent>,
-    get_data: T,
-) -> bool {
-    if matches!(log_event.event, Event::DataLog(serde_json::Value::Null)) {
-        send.send(LogEvent::new(component, Event::DataLog(get_data())))
-            .unwrap();
-        return true;
+#[derive(Debug)]
+pub struct MessageChannel<T: Clone> {
+    send: Sender<T>,
+    recv: Receiver<T>,
+}
+impl<T: Clone> From<Sender<T>> for MessageChannel<T> {
+    fn from(send: Sender<T>) -> Self {
+        Self {
+            send: send.clone(),
+            recv: send.subscribe(),
+        }
     }
-    false
+}
+impl<T: Clone> MessageChannel<T> {
+    pub fn send(&self, value: T) -> Result<usize, SendError<T>> {
+        self.send.send(value)
+    }
+    pub async fn recv(&mut self) -> Result<T, RecvError> {
+        self.recv.recv().await
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Shareable<T> {
+    pub data: Arc<Mutex<T>>,
+}
+impl<T> From<T> for Shareable<T> {
+    fn from(value: T) -> Self {
+        Self {
+            data: Arc::new(Mutex::new(value)),
+        }
+    }
 }
