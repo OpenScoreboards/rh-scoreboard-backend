@@ -48,8 +48,10 @@ impl ClockComponent {
                 self.last_state_change = event.timestamp;
             }
             (S::Stopped, E::Start) => {
-                self.state = S::Running;
-                self.last_state_change = event.timestamp;
+                if self.last_time_remaining != Duration::from_secs(0) {
+                    self.state = S::Running;
+                    self.last_state_change = event.timestamp;
+                }
             }
             (_, E::Expired) => {
                 self.state = S::Stopped;
