@@ -227,9 +227,13 @@ fn toggle_event_handler(
         .expect("message sent");
 }
 
+fn create_data_channel<T: Clone>() -> Sender<T> {
+    broadcast::channel::<T>(512).0
+}
+
 macro_rules! run_unique_component {
     ($typ: ident, $send: expr, $data_channels: expr $(,)?) => {{
-        let (data_channel, _) = broadcast::channel::<Value>(4);
+        let data_channel = create_data_channel();
         let component = $typ::new($send.clone(), data_channel.clone());
         tokio::spawn(async move { component.run().await });
         $data_channels.push(data_channel.clone());
@@ -238,7 +242,7 @@ macro_rules! run_unique_component {
 }
 macro_rules! run_component {
     ($typ: ident, $component: expr, $name: expr, $send: expr, $data_channels: expr $(,)?) => {
-        let (data_channel, _) = broadcast::channel::<Value>(4);
+        let data_channel = create_data_channel();
         let component = $typ::new($component, $name, $send.clone(), data_channel.clone());
         tokio::spawn(async move { component.run().await });
         $data_channels.push(data_channel);
@@ -271,9 +275,8 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
     use GlobalComponent as GC;
     use TeamComponent as TC;
 
-    let (game_clock_data_channel, _) = broadcast::channel::<Value>(4);
-    let (game_clock_typed_data_channel, _) =
-        broadcast::channel::<Option<(ClockState, Instant, Duration)>>(4);
+    let game_clock_data_channel = create_data_channel();
+    let game_clock_typed_data_channel = create_data_channel();
     let component = GameClock::new(
         send.clone(),
         game_clock_data_channel.clone(),
@@ -290,9 +293,8 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
     );
     run_unique_component!(Siren, send, data_channels);
 
-    let (shot_clock_data_channel, _) = broadcast::channel::<Value>(4);
-    let (shot_clock_typed_data_channel, _) =
-        broadcast::channel::<Option<(ClockState, Instant, Duration)>>(4);
+    let shot_clock_data_channel = create_data_channel();
+    let shot_clock_typed_data_channel = create_data_channel();
     let component = GameDependentClock::new(
         C::Global(GC::ShotClock),
         "shot_clock",
@@ -356,7 +358,7 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
 
 #[launch]
 async fn rocket() -> _ {
-    let (send, _) = broadcast::channel::<LogEvent>(32);
+    let (send, _) = broadcast::channel::<LogEvent>(2048);
     let mut data_channels = vec![];
 
     add_components(send.clone(), &mut data_channels);
