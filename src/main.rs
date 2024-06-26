@@ -4,7 +4,7 @@ extern crate rocket;
 mod component;
 mod event;
 // mod scoreboard;
-use std::time::{Duration, Instant};
+use std::time::{Duration};
 
 use component::{
     clock::{start_expiry_watcher, GameClock, GameDependentClock},
@@ -12,7 +12,7 @@ use component::{
     toggle::{Siren, Toggle},
     Component, GlobalComponent, TeamComponent,
 };
-use event::states::{ClockState, CounterEvent, ToggleEvent};
+use event::states::{CounterEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
     fairing::{Fairing, Info, Kind},
