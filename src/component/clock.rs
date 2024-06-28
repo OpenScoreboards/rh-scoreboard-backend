@@ -43,7 +43,7 @@ impl ClockComponent {
             }
             (S::Running, E::Stop) => {
                 self.state = S::Stopped;
-                let time_elapsed = Instant::now() - self.last_state_change;
+                let time_elapsed = event.timestamp - self.last_state_change;
                 self.last_time_remaining = self.last_time_remaining.saturating_sub(time_elapsed);
                 self.last_state_change = event.timestamp;
             }
@@ -58,18 +58,62 @@ impl ClockComponent {
                 self.last_state_change = event.timestamp;
                 self.last_time_remaining = Duration::from_secs(0);
             }
-            _ => {
-                eprintln!(
-                    "Clock event {clock_event:?} in state {:?} has no action",
-                    &self.state
-                );
-            }
+            _ => {}
+        }
+    }
+    fn get_time_remaining(&self) -> Duration {
+        let time_elapsed = Instant::now() - self.last_state_change;
+        if matches!(self.state, ClockState::Running) {
+            self.last_time_remaining.saturating_sub(time_elapsed)
+        } else {
+            self.last_time_remaining
         }
     }
 }
 
 fn to_json_value<T: Milliseconds>(value: &T) -> Value {
     serde_millis::serialize(value, Serializer).expect("failed to serialize to milliseconds")
+}
+
+fn start_data_channel_manager(
+    clock: Shareable<ClockComponent>,
+    mut data_channel: MessageChannel<Value>,
+) {
+    tokio::spawn(async move {
+        loop {
+            let Ok(Value::Null) = data_channel.recv().await else {
+                continue;
+            };
+            let clock = clock.data.lock().unwrap();
+            let _ = data_channel.send(json!({
+                &clock.name: {
+                    "last_time_remaining": to_json_value(&clock.last_time_remaining),
+                    "last_state_change": to_json_value(&clock.last_state_change),
+                    "state": &clock.state,
+                    "time_remaining": to_json_value(&clock.get_time_remaining()),
+                }
+            }));
+        }
+    });
+}
+
+fn start_typed_data_channel_manager(
+    clock: Shareable<ClockComponent>,
+    mut data_channel: MessageChannel<Option<(ClockState, Instant, Duration)>>,
+) {
+    tokio::spawn(async move {
+        loop {
+            let Ok(None) = data_channel.recv().await else {
+                continue;
+            };
+            let clock = clock.data.lock().unwrap();
+            let _ = data_channel.send(Some((
+                clock.state,
+                clock.last_state_change,
+                clock.last_time_remaining,
+            )));
+        }
+    });
 }
 
 #[derive(Debug)]
@@ -93,36 +137,8 @@ impl GameClock {
         }
     }
     pub async fn run(mut self) {
-        let clock = self.clock.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok(Value::Null) = self.data_channel.recv().await else {
-                    continue;
-                };
-                let clock = clock.data.lock().unwrap();
-                let _ = self.data_channel.send(json!({
-                    &clock.name: {
-                        "last_time_remaining": to_json_value(&clock.last_time_remaining),
-                        "last_state_change": to_json_value(&clock.last_state_change),
-                        "state": &clock.state,
-                    }
-                }));
-            }
-        });
-        let clock = self.clock.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok(None) = self.typed_data_channel.recv().await else {
-                    continue;
-                };
-                let clock = clock.data.lock().unwrap();
-                let _ = self.typed_data_channel.send(Some((
-                    clock.state,
-                    clock.last_state_change,
-                    clock.last_time_remaining,
-                )));
-            }
-        });
+        start_data_channel_manager(self.clock.clone(), self.data_channel);
+        start_typed_data_channel_manager(self.clock.clone(), self.typed_data_channel);
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
                 if log_event.component != Component::Global(GlobalComponent::GameClock) {
@@ -157,7 +173,10 @@ pub fn start_expiry_watcher(
                     break;
                 }
                 event_sender
-                    .send(LogEvent::new_now(component, Event::Clock(ClockEvent::Expired)))
+                    .send(LogEvent::new_now(
+                        component,
+                        Event::Clock(ClockEvent::Expired),
+                    ))
                     .unwrap();
                 if activate_siren {
                     event_sender
@@ -206,36 +225,8 @@ impl GameDependentClock {
         }
     }
     pub async fn run(mut self) {
-        let clock = self.clock.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok(Value::Null) = self.data_channel.recv().await else {
-                    continue;
-                };
-                let clock = clock.data.lock().unwrap();
-                let _ = self.data_channel.send(json!({
-                    &clock.name: {
-                        "last_time_remaining": to_json_value(&clock.last_time_remaining),
-                        "last_state_change": to_json_value(&clock.last_state_change),
-                        "state": &clock.state,
-                    }
-                }));
-            }
-        });
-        let clock = self.clock.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok(None) = self.typed_data_channel.recv().await else {
-                    continue;
-                };
-                let clock = clock.data.lock().unwrap();
-                let _ = self.typed_data_channel.send(Some((
-                    clock.state,
-                    clock.last_state_change,
-                    clock.last_time_remaining,
-                )));
-            }
-        });
+        start_data_channel_manager(self.clock.clone(), self.data_channel);
+        start_typed_data_channel_manager(self.clock.clone(), self.typed_data_channel);
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
                 if !matches!(
