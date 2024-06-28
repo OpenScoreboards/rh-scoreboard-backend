@@ -363,6 +363,13 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
         game_clock_typed_data_channel,
     );
     run_unique_component!(Siren, send, data_channels);
+    run_component!(
+        Counter,
+        Component::Global(GlobalComponent::Period),
+        "period",
+        send,
+        data_channels,
+    );
 
     let shot_clock_data_channel = create_data_channel();
     let shot_clock_typed_data_channel = create_data_channel();
