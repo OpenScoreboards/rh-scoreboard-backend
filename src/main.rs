@@ -9,10 +9,11 @@ use std::time::Duration;
 use component::{
     clock::{start_expiry_watcher, GameClock, GameDependentClock},
     counter::{Counter, TeamFoulCounter},
+    label::Label,
     toggle::{Siren, Toggle},
     Component, GlobalComponent, TeamComponent,
 };
-use event::states::{CounterEvent, ToggleEvent};
+use event::states::{CounterEvent, LabelEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
     fairing::{Fairing, Info, Kind},
@@ -298,6 +299,81 @@ fn toggle_event_handler(
         .expect("message sent");
 }
 
+// Labels
+
+#[post("/<target>/<label_event>?<value>&<ts>&<uuid>")]
+fn global_label_event(
+    sender: &State<Sender<LogEvent>>,
+    target: GlobalComponent,
+    label_event: LabelEvent,
+    value: Option<String>,
+    ts: Option<usize>,
+    uuid: Option<String>,
+) {
+    label_event_handler(
+        sender,
+        Component::Global(target),
+        label_event,
+        value,
+        ts,
+        uuid,
+    );
+}
+#[post("/home/<target>/<label_event>?<value>&<ts>&<uuid>")]
+fn home_label_event(
+    sender: &State<Sender<LogEvent>>,
+    target: TeamComponent,
+    label_event: LabelEvent,
+    value: Option<String>,
+    ts: Option<usize>,
+    uuid: Option<String>,
+) {
+    label_event_handler(
+        sender,
+        Component::Home(target),
+        label_event,
+        value,
+        ts,
+        uuid,
+    );
+}
+#[post("/away/<target>/<label_event>?<value>&<ts>&<uuid>")]
+fn away_label_event(
+    sender: &State<Sender<LogEvent>>,
+    target: TeamComponent,
+    label_event: LabelEvent,
+    value: Option<String>,
+    ts: Option<usize>,
+    uuid: Option<String>,
+) {
+    label_event_handler(
+        sender,
+        Component::Away(target),
+        label_event,
+        value,
+        ts,
+        uuid,
+    );
+}
+fn label_event_handler(
+    sender: &State<Sender<LogEvent>>,
+    target: Component,
+    mut label_event: LabelEvent,
+    value: Option<String>,
+    ts: Option<usize>,
+    uuid: Option<String>,
+) {
+    if !target.is_label() {
+        panic!("{target:?} is not a label component");
+    };
+    if let (LabelEvent::Set(_), Some(val)) = (&label_event, value) {
+        label_event = LabelEvent::Set(val);
+    }
+    sender
+        .send(LogEvent::new(target, Event::Label(label_event), ts, uuid))
+        .expect("message sent");
+}
+
 fn create_data_channel<T: Clone>() -> Sender<T> {
     broadcast::channel::<T>(512).0
 }
@@ -447,6 +523,9 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
         send,
         data_channels,
     );
+
+    run_component!(Label, C::Home(TC::TeamName), "home", send, data_channels,);
+    run_component!(Label, C::Away(TC::TeamName), "away", send, data_channels,);
 }
 
 #[launch]
@@ -472,5 +551,9 @@ async fn rocket() -> _ {
         .mount(
             "/toggle/",
             routes![global_toggle_event, home_toggle_event, away_toggle_event],
+        )
+        .mount(
+            "/label/",
+            routes![global_label_event, home_label_event, away_label_event],
         )
 }

@@ -3,6 +3,7 @@ use strum::{EnumString, ParseError};
 
 pub mod clock;
 pub mod counter;
+pub mod label;
 pub mod toggle;
 
 macro_rules! generate_components {
@@ -11,10 +12,12 @@ macro_rules! generate_components {
             clock: $(- $g_clock_name: ident)*
             counter: $(- $g_counter_name: ident)*
             toggle: $(- $g_toggle_name: ident)*
+            label: $(- $g_label_name: ident)*
         per_team:
             clock: $(- $t_clock_name: ident)*
             counter: $(- $t_counter_name: ident)*
             toggle: $(- $t_toggle_name: ident)*
+            label: $(- $t_label_name: ident)*
     ) => {
             #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
             pub enum Component {
@@ -41,6 +44,12 @@ macro_rules! generate_components {
                         Component::Home(c) | Component::Away(c) => c.is_toggle(),
                     }
                 }
+                pub fn is_label(&self) -> bool {
+                    match self {
+                        Component::Global(c) => c.is_label(),
+                        Component::Home(c) | Component::Away(c) => c.is_label(),
+                    }
+                }
             }
             #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, EnumString)]
             #[strum(ascii_case_insensitive)]
@@ -48,6 +57,7 @@ macro_rules! generate_components {
                 $($g_clock_name ,)*
                 $($g_counter_name ,)*
                 $($g_toggle_name ,)*
+                $($g_label_name ,)*
             }
             impl GlobalComponent {
                 pub fn is_clock(&self) -> bool {
@@ -59,6 +69,9 @@ macro_rules! generate_components {
                 pub fn is_toggle(&self) -> bool {
                     $(matches!(self, Self::$g_toggle_name))||*
                 }
+                pub fn is_label(&self) -> bool {
+                    $(matches!(self, Self::$g_label_name))||*
+                }
             }
             #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, EnumString)]
             #[strum(ascii_case_insensitive)]
@@ -66,6 +79,7 @@ macro_rules! generate_components {
                 $($t_clock_name ,)*
                 $($t_counter_name ,)*
                 $($t_toggle_name ,)*
+                $($t_label_name ,)*
             }
             impl TeamComponent {
                 pub fn is_clock(&self) -> bool {
@@ -76,6 +90,9 @@ macro_rules! generate_components {
                 }
                 pub fn is_toggle(&self) -> bool {
                     $(matches!(self, Self::$t_toggle_name))||*
+                }
+                pub fn is_label(&self) -> bool {
+                    $(matches!(self, Self::$t_label_name))||*
                 }
             }
     };
@@ -90,6 +107,8 @@ generate_components!(
             - Period
         toggle:
             - Siren
+        label:
+            - MatchTitle
     per_team:
         clock:
             - InferiorityClock
@@ -99,15 +118,9 @@ generate_components!(
         toggle:
             - TimeOutWarning
             - TeamFoulWarning
+        label:
+            - TeamName
 );
-
-// enum Component {
-//     Global(GlobalComponent),
-//     Home(TeamComponent),
-//     Away(TeamComponent),
-// }
-// enum TeamComponent {}
-// enum GlobalComponent {}
 
 impl<'a> FromParam<'a> for TeamComponent {
     type Error = ParseError;

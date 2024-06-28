@@ -57,3 +57,15 @@ impl<'a> FromParam<'a> for ToggleEvent {
         param.try_into()
     }
 }
+
+#[derive(Debug, Clone, Serialize, EnumString)]
+#[strum(ascii_case_insensitive)]
+pub enum LabelEvent {
+    Set(String),
+}
+impl<'a> FromParam<'a> for LabelEvent {
+    type Error = ParseError;
+    fn from_param(param: &'a str) -> Result<Self, Self::Error> {
+        param.try_into()
+    }
+}

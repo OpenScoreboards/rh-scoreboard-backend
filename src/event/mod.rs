@@ -10,7 +10,7 @@ use rocket::tokio::sync::broadcast::{
     error::{RecvError, SendError},
     Receiver, Sender,
 };
-use states::{ClockEvent, CounterEvent, ToggleEvent};
+use states::{ClockEvent, CounterEvent, LabelEvent, ToggleEvent};
 use uuid::Uuid;
 
 use crate::component::Component;
@@ -20,6 +20,7 @@ pub enum Event {
     Clock(ClockEvent),
     Counter(CounterEvent),
     Toggle(ToggleEvent),
+    Label(LabelEvent),
 }
 
 #[derive(Debug, Clone)]
