@@ -30,10 +30,34 @@ pub struct LogEvent {
     pub event: Event,
 }
 impl LogEvent {
-    pub fn new(component: Component, event: Event) -> Self {
+    pub fn new_now(component: Component, event: Event) -> Self {
         Self {
             timestamp: Instant::now(),
             log_id: Uuid::new_v4(),
+            component,
+            event,
+        }
+    }
+    pub fn new(
+        component: Component,
+        event: Event,
+        ts: Option<usize>,
+        uuid: Option<String>,
+    ) -> Self {
+        let timestamp = ts
+            .and_then(|ts| {
+                let ts_str = ts.to_string();
+                let mut deserializer = serde_json::Deserializer::from_str(&ts_str);
+                serde_millis::deserialize(&mut deserializer).ok()
+            })
+            .unwrap_or_else(Instant::now);
+
+        let log_id = uuid
+            .and_then(|uuid| Uuid::parse_str(&uuid).ok())
+            .unwrap_or(Uuid::new_v4());
+        Self {
+            timestamp,
+            log_id,
             component,
             event,
         }

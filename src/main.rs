@@ -4,7 +4,7 @@ extern crate rocket;
 mod component;
 mod event;
 // mod scoreboard;
-use std::time::{Duration};
+use std::time::Duration;
 
 use component::{
     clock::{start_expiry_watcher, GameClock, GameDependentClock},
@@ -98,38 +98,67 @@ fn echo_stream<'a>(
 
 // Clocks
 
-#[post("/<target>/<clock_event>?<value>")]
+#[post("/<target>/<clock_event>?<value>&<ts>&<uuid>")]
 fn global_clock_event(
     sender: &State<Sender<LogEvent>>,
     target: GlobalComponent,
     clock_event: ClockEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    clock_event_handler(sender, Component::Global(target), clock_event, value);
+    clock_event_handler(
+        sender,
+        Component::Global(target),
+        clock_event,
+        value,
+        ts,
+        uuid,
+    );
 }
-#[post("/home/<target>/<clock_event>?<value>")]
+#[post("/home/<target>/<clock_event>?<value>&<ts>&<uuid>")]
 fn home_clock_event(
     sender: &State<Sender<LogEvent>>,
     target: TeamComponent,
     clock_event: ClockEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    clock_event_handler(sender, Component::Home(target), clock_event, value);
+    clock_event_handler(
+        sender,
+        Component::Home(target),
+        clock_event,
+        value,
+        ts,
+        uuid,
+    );
 }
-#[post("/away/<target>/<clock_event>?<value>")]
+#[post("/away/<target>/<clock_event>?<value>&<ts>&<uuid>")]
 fn away_clock_event(
     sender: &State<Sender<LogEvent>>,
     target: TeamComponent,
     clock_event: ClockEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    clock_event_handler(sender, Component::Away(target), clock_event, value);
+    clock_event_handler(
+        sender,
+        Component::Away(target),
+        clock_event,
+        value,
+        ts,
+        uuid,
+    );
 }
 fn clock_event_handler(
     sender: &State<Sender<LogEvent>>,
     target: Component,
     mut clock_event: ClockEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
     if !target.is_clock() {
         panic!("{target:?} is not a clock component");
@@ -138,44 +167,73 @@ fn clock_event_handler(
         clock_event = ClockEvent::Set(Duration::from_millis(ms));
     }
     sender
-        .send(LogEvent::new(target, Event::Clock(clock_event)))
+        .send(LogEvent::new(target, Event::Clock(clock_event), ts, uuid))
         .expect("message sent");
 }
 
 // Counters
 
-#[post("/<target>/<counter_event>?<value>")]
+#[post("/<target>/<counter_event>?<value>&<ts>&<uuid>")]
 fn global_counter_event(
     sender: &State<Sender<LogEvent>>,
     target: GlobalComponent,
     counter_event: CounterEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    counter_event_handler(sender, Component::Global(target), counter_event, value);
+    counter_event_handler(
+        sender,
+        Component::Global(target),
+        counter_event,
+        value,
+        ts,
+        uuid,
+    );
 }
-#[post("/home/<target>/<counter_event>?<value>")]
+#[post("/home/<target>/<counter_event>?<value>&<ts>&<uuid>")]
 fn home_counter_event(
     sender: &State<Sender<LogEvent>>,
     target: TeamComponent,
     counter_event: CounterEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    counter_event_handler(sender, Component::Home(target), counter_event, value);
+    counter_event_handler(
+        sender,
+        Component::Home(target),
+        counter_event,
+        value,
+        ts,
+        uuid,
+    );
 }
-#[post("/away/<target>/<counter_event>?<value>")]
+#[post("/away/<target>/<counter_event>?<value>&<ts>&<uuid>")]
 fn away_counter_event(
     sender: &State<Sender<LogEvent>>,
     target: TeamComponent,
     counter_event: CounterEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    counter_event_handler(sender, Component::Away(target), counter_event, value);
+    counter_event_handler(
+        sender,
+        Component::Away(target),
+        counter_event,
+        value,
+        ts,
+        uuid,
+    );
 }
 fn counter_event_handler(
     sender: &State<Sender<LogEvent>>,
     target: Component,
     mut counter_event: CounterEvent,
     value: Option<u64>,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
     if !target.is_counter() {
         panic!("{target:?} is not a counter component");
@@ -184,46 +242,59 @@ fn counter_event_handler(
         counter_event = CounterEvent::Set(val);
     }
     sender
-        .send(LogEvent::new(target, Event::Counter(counter_event)))
+        .send(LogEvent::new(
+            target,
+            Event::Counter(counter_event),
+            ts,
+            uuid,
+        ))
         .expect("message sent");
 }
 
 // Toggles
 
-#[post("/<target>/<toggle_event>")]
+#[post("/<target>/<toggle_event>?<ts>&<uuid>")]
 fn global_toggle_event(
     sender: &State<Sender<LogEvent>>,
     target: GlobalComponent,
     toggle_event: ToggleEvent,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    toggle_event_handler(sender, Component::Global(target), toggle_event);
+    toggle_event_handler(sender, Component::Global(target), toggle_event, ts, uuid);
 }
-#[post("/home/<target>/<toggle_event>")]
+#[post("/home/<target>/<toggle_event>?<ts>&<uuid>")]
 fn home_toggle_event(
     sender: &State<Sender<LogEvent>>,
     target: TeamComponent,
     toggle_event: ToggleEvent,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    toggle_event_handler(sender, Component::Home(target), toggle_event);
+    toggle_event_handler(sender, Component::Home(target), toggle_event, ts, uuid);
 }
-#[post("/away/<target>/<toggle_event>")]
+#[post("/away/<target>/<toggle_event>?<ts>&<uuid>")]
 fn away_toggle_event(
     sender: &State<Sender<LogEvent>>,
     target: TeamComponent,
     toggle_event: ToggleEvent,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
-    toggle_event_handler(sender, Component::Away(target), toggle_event);
+    toggle_event_handler(sender, Component::Away(target), toggle_event, ts, uuid);
 }
 fn toggle_event_handler(
     sender: &State<Sender<LogEvent>>,
     target: Component,
     toggle_event: ToggleEvent,
+    ts: Option<usize>,
+    uuid: Option<String>,
 ) {
     if !target.is_toggle() {
         panic!("{target:?} is not a clock component");
     };
     sender
-        .send(LogEvent::new(target, Event::Toggle(toggle_event)))
+        .send(LogEvent::new(target, Event::Toggle(toggle_event), ts, uuid))
         .expect("message sent");
 }
 

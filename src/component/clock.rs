@@ -157,18 +157,18 @@ pub fn start_expiry_watcher(
                     break;
                 }
                 event_sender
-                    .send(LogEvent::new(component, Event::Clock(ClockEvent::Expired)))
+                    .send(LogEvent::new_now(component, Event::Clock(ClockEvent::Expired)))
                     .unwrap();
                 if activate_siren {
                     event_sender
-                        .send(LogEvent::new(
+                        .send(LogEvent::new_now(
                             Component::Global(GlobalComponent::Siren),
                             Event::Toggle(ToggleEvent::Activate),
                         ))
                         .unwrap();
                     sleep(Duration::from_secs(2)).await;
                     event_sender
-                        .send(LogEvent::new(
+                        .send(LogEvent::new_now(
                             Component::Global(GlobalComponent::Siren),
                             Event::Toggle(ToggleEvent::Deactivate),
                         ))

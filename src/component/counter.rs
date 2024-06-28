@@ -126,19 +126,21 @@ impl TeamFoulCounter {
                 };
                 if counter.value > 5 && (counter.value + 1) % 5 == 0 {
                     self.event_channel
-                        .send(LogEvent::new_now(
-                            target,
-                            Event::Toggle(ToggleEvent::Activate),
-                        ))
+                        .send(LogEvent {
+                            component: target,
+                            event: Event::Toggle(ToggleEvent::Activate),
+                            ..log_event
+                        })
                         .expect("message sent");
                 } else if counter.value > 5 && ((counter.value + 2) % 5 == 0)
                     || ((counter.value) % 5 == 0)
                 {
                     self.event_channel
-                        .send(LogEvent::new_now(
-                            target,
-                            Event::Toggle(ToggleEvent::Deactivate),
-                        ))
+                        .send(LogEvent {
+                            component: target,
+                            event: Event::Toggle(ToggleEvent::Deactivate),
+                            ..log_event
+                        })
                         .expect("message sent");
                 };
             }
