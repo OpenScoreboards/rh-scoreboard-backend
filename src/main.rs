@@ -404,13 +404,6 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
         data_channels
     );
     run_component!(
-        Toggle,
-        C::Home(TC::TeamFoulWarning),
-        "home_team_foul_warning",
-        send,
-        data_channels,
-    );
-    run_component!(
         TeamFoulCounter,
         C::Away(TC::TeamFouls),
         "away_tf",
@@ -420,8 +413,30 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
 
     run_component!(
         Toggle,
+        C::Home(TC::TeamFoulWarning),
+        "home_team_foul_warning",
+        send,
+        data_channels,
+    );
+    run_component!(
+        Toggle,
         C::Away(TC::TeamFoulWarning),
         "away_team_foul_warning",
+        send,
+        data_channels,
+    );
+
+    run_component!(
+        Toggle,
+        C::Home(TC::TimeOutWarning),
+        "home_team_timeout",
+        send,
+        data_channels,
+    );
+    run_component!(
+        Toggle,
+        C::Away(TC::TimeOutWarning),
+        "away_team_timeout",
         send,
         data_channels,
     );
