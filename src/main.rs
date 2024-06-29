@@ -16,15 +16,11 @@ use component::{
 use event::states::{CounterEvent, LabelEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
-    fairing::{Fairing, Info, Kind},
-    futures::SinkExt,
-    http::Header,
-    tokio::{
+    fairing::{Fairing, Info, Kind}, fs::FileServer, futures::SinkExt, http::Header, tokio::{
         self,
         sync::broadcast::{self, error::RecvError, Sender},
         time::sleep,
-    },
-    Request, Response, State,
+    }, Request, Response, State
 };
 use serde_json::{Map, Value};
 use ws::Message;
@@ -477,6 +473,8 @@ async fn rocket() -> _ {
         .manage(send)
         .manage(data_channels)
         .mount("/", routes![index, data, echo_stream, reset])
+        .mount("/scoreboard", FileServer::from("static"))
+        .mount("/_app", FileServer::from("static/_app"))
         .mount(
             "/clock/",
             routes![global_clock_event, home_clock_event, away_clock_event],
