@@ -123,12 +123,13 @@ fn start_data_channel_manager(
                 continue;
             };
             let clock = clock.data.lock().unwrap();
+            let time_remaining = clock.get_time_remaining().as_secs();
             let _ = data_channel.send(json!({
                 &clock.name: {
                     "last_time_remaining": to_json_value(&clock.last_time_remaining),
                     "last_state_change": to_json_value(&clock.last_state_change),
                     "state": &clock.state,
-                    "time_remaining": to_json_value(&clock.get_time_remaining()),
+                    "time_remaining": format!("{:0>2}:{:0>2}", (time_remaining / 60) % 60, time_remaining % 60)
                 }
             }));
         }
