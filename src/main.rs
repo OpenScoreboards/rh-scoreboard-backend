@@ -450,6 +450,7 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
         Toggle { C::Away(TC::TeamFoulWarning), "away_team_foul_warning" },
         Toggle { C::Home(TC::TimeOutWarning), "home_team_timeout" },
         Toggle { C::Away(TC::TimeOutWarning), "away_team_timeout" },
+        Label { C::Global(GC::MatchTitle), "match_title", "" },
         Label { C::Home(TC::TeamName), "home", "Home" },
         Label { C::Away(TC::TeamName), "away", "Away" },
     );
