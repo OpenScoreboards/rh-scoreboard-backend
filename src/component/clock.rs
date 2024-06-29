@@ -68,7 +68,11 @@ impl ClockComponent {
                 self.last_time_remaining = *val;
             }
             (_, E::Increment(val)) => {
-                let time_elapsed = event.timestamp - self.last_state_change;
+                let time_elapsed = if let ClockState::Running = self.state {
+                    event.timestamp - self.last_state_change
+                } else {
+                    Duration::from_secs(0)
+                };
                 self.last_time_remaining = self
                     .last_time_remaining
                     .saturating_sub(time_elapsed)
@@ -76,7 +80,11 @@ impl ClockComponent {
                 self.last_state_change = event.timestamp;
             }
             (_, E::Decrement(val)) => {
-                let time_elapsed = event.timestamp - self.last_state_change;
+                let time_elapsed = if let ClockState::Running = self.state {
+                    event.timestamp - self.last_state_change
+                } else {
+                    Duration::from_secs(0)
+                };
                 self.last_time_remaining = self
                     .last_time_remaining
                     .saturating_sub(time_elapsed)
