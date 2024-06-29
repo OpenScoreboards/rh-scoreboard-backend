@@ -47,17 +47,41 @@ impl ClockComponent {
                 self.last_state_change = event.timestamp;
                 self.last_time_remaining = *duration;
             }
-            (S::Running, E::Stop) => {
+            (S::Running, E::Stop(None)) => {
                 self.state = S::Stopped;
                 let time_elapsed = event.timestamp - self.last_state_change;
                 self.last_time_remaining = self.last_time_remaining.saturating_sub(time_elapsed);
                 self.last_state_change = event.timestamp;
             }
-            (S::Stopped, E::Start) => {
-                if self.last_time_remaining != Duration::from_secs(0) {
-                    self.state = S::Running;
-                    self.last_state_change = event.timestamp;
-                }
+            (S::Running, E::Stop(Some(val))) => {
+                self.state = S::Stopped;
+                self.last_time_remaining = *val;
+                self.last_state_change = event.timestamp;
+            }
+            (S::Stopped, E::Start(None)) if self.last_time_remaining != Duration::from_secs(0) => {
+                self.state = S::Running;
+                self.last_state_change = event.timestamp;
+            }
+            (S::Stopped, E::Start(Some(val))) if *val != Duration::from_secs(0) => {
+                self.state = S::Running;
+                self.last_state_change = event.timestamp;
+                self.last_time_remaining = *val;
+            }
+            (_, E::Increment(val)) => {
+                let time_elapsed = event.timestamp - self.last_state_change;
+                self.last_time_remaining = self
+                    .last_time_remaining
+                    .saturating_sub(time_elapsed)
+                    .saturating_add(*val);
+                self.last_state_change = event.timestamp;
+            }
+            (_, E::Decrement(val)) => {
+                let time_elapsed = event.timestamp - self.last_state_change;
+                self.last_time_remaining = self
+                    .last_time_remaining
+                    .saturating_sub(time_elapsed)
+                    .saturating_sub(*val);
+                self.last_state_change = event.timestamp;
             }
             (_, E::Expired) => {
                 self.state = S::Stopped;
@@ -242,7 +266,7 @@ impl GameDependentClock {
                     LogEvent {
                         component: Component::Global(GlobalComponent::GameClock),
                         event: Event::Clock(
-                            ClockEvent::Start | ClockEvent::Stop | ClockEvent::Expired
+                            ClockEvent::Start(None) | ClockEvent::Stop(None) | ClockEvent::Expired
                         ),
                         ..
                     }

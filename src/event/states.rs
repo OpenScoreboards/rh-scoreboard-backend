@@ -14,8 +14,10 @@ pub enum ClockState {
 #[strum(ascii_case_insensitive)]
 pub enum ClockEvent {
     Set(Duration),
-    Start,
-    Stop,
+    Start(Option<Duration>),
+    Stop(Option<Duration>),
+    Increment(Duration),
+    Decrement(Duration),
     Expired,
 }
 impl<'a> FromParam<'a> for ClockEvent {

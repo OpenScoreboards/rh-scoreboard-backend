@@ -171,9 +171,16 @@ fn clock_event_handler(
     if !target.is_clock() {
         panic!("{target:?} is not a clock component");
     };
-    if let (ClockEvent::Set(_), Some(ms)) = (clock_event, value) {
-        clock_event = ClockEvent::Set(Duration::from_millis(ms));
-    }
+
+    clock_event = match (clock_event, value) {
+        (ClockEvent::Set(_), Some(ms)) => ClockEvent::Set(Duration::from_millis(ms)),
+        (ClockEvent::Increment(_), Some(ms)) => ClockEvent::Increment(Duration::from_millis(ms)),
+        (ClockEvent::Decrement(_), Some(ms)) => ClockEvent::Decrement(Duration::from_millis(ms)),
+        (ClockEvent::Start(_), Some(ms)) => ClockEvent::Start(Some(Duration::from_millis(ms))),
+        (ClockEvent::Stop(_), Some(ms)) => ClockEvent::Stop(Some(Duration::from_millis(ms))),
+        _ => clock_event,
+    };
+
     sender
         .send(LogEvent::new(target, Event::Clock(clock_event), ts, uuid))
         .expect("message sent");
