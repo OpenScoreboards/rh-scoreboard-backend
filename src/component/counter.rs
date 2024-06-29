@@ -13,14 +13,23 @@ use super::TeamComponent;
 
 #[derive(Debug, Clone)]
 struct InternalCounter {
+    orig_value: u64,
     value: u64,
     name: String,
 }
 impl InternalCounter {
     pub fn new(name: String, value: u64) -> Self {
-        InternalCounter { value, name }
+        InternalCounter {
+            value,
+            orig_value: value,
+            name,
+        }
     }
     fn process_event(&mut self, event: &LogEvent) {
+        if let Event::Reset = &event.event {
+            self.value = self.orig_value;
+            return;
+        }
         let Event::Counter(counter_event) = &event.event else {
             return;
         };
@@ -70,7 +79,10 @@ impl Counter {
         });
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
-                if log_event.component != self.component {
+                if !self
+                    .component
+                    .is_event_component_relevant(&log_event.component)
+                {
                     continue;
                 }
                 self.counter.data.lock().unwrap().process_event(&log_event);
@@ -114,7 +126,10 @@ impl TeamFoulCounter {
         });
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
-                if log_event.component != self.component {
+                if !self
+                    .component
+                    .is_event_component_relevant(&log_event.component)
+                {
                     continue;
                 }
                 let mut counter = self.counter.data.lock().unwrap();

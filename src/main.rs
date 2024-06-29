@@ -97,6 +97,13 @@ fn echo_stream<'a>(
     })
 }
 
+#[post("/reset?<ts>&<uuid>")]
+fn reset(sender: &State<Sender<LogEvent>>, ts: Option<usize>, uuid: Option<String>) {
+    sender
+        .send(LogEvent::new(Component::All, Event::Reset, ts, uuid))
+        .expect("message sent");
+}
+
 // Clocks
 
 #[post("/<target>/<clock_event>?<value>&<ts>&<uuid>")]
@@ -462,7 +469,7 @@ async fn rocket() -> _ {
         .attach(CORS)
         .manage(send)
         .manage(data_channels)
-        .mount("/", routes![index, data, echo_stream])
+        .mount("/", routes![index, data, echo_stream, reset])
         .mount(
             "/clock/",
             routes![global_clock_event, home_clock_event, away_clock_event],

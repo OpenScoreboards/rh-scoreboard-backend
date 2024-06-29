@@ -9,13 +9,22 @@ use super::Component;
 #[derive(Debug, Clone, Serialize)]
 struct InternalLabel {
     name: String,
+    orig_value: String,
     value: String,
 }
 impl InternalLabel {
     pub fn new(name: String, value: String) -> Self {
-        InternalLabel { name, value }
+        InternalLabel {
+            name,
+            orig_value: value.clone(),
+            value,
+        }
     }
     fn process_event(&mut self, event: &LogEvent) {
+        if let Event::Reset = &event.event {
+            self.value.clone_from(&self.orig_value);
+            return;
+        }
         let Event::Label(counter_event) = &event.event else {
             return;
         };
@@ -63,7 +72,10 @@ impl Label {
         });
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
-                if log_event.component != self.component {
+                if !self
+                    .component
+                    .is_event_component_relevant(&log_event.component)
+                {
                     continue;
                 }
                 self.label.data.lock().unwrap().process_event(&log_event);

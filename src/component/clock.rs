@@ -33,6 +33,12 @@ impl ClockComponent {
         use ClockEvent as E;
         use ClockState as S;
 
+        if let Event::Reset = &event.event {
+            self.state = ClockState::Stopped;
+            self.last_state_change = event.timestamp;
+            self.last_time_remaining = Duration::from_secs(0);
+            return;
+        }
         let Event::Clock(clock_event) = &event.event else {
             return;
         };
@@ -141,7 +147,9 @@ impl GameClock {
         start_typed_data_channel_manager(self.clock.clone(), self.typed_data_channel);
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
-                if log_event.component != Component::Global(GlobalComponent::GameClock) {
+                if !Component::Global(GlobalComponent::GameClock)
+                    .is_event_component_relevant(&log_event.component)
+                {
                     continue;
                 }
                 self.clock.data.lock().unwrap().process_event(&log_event);
@@ -238,7 +246,9 @@ impl GameDependentClock {
                         ),
                         ..
                     }
-                ) && log_event.component != self.component
+                ) && !self
+                    .component
+                    .is_event_component_relevant(&log_event.component)
                 {
                     continue;
                 }

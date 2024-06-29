@@ -21,6 +21,7 @@ macro_rules! generate_components {
     ) => {
             #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
             pub enum Component {
+                All,
                 Global(GlobalComponent),
                 Home(TeamComponent),
                 Away(TeamComponent),
@@ -30,24 +31,28 @@ macro_rules! generate_components {
                     match self {
                         Component::Global(c) => c.is_clock(),
                         Component::Home(c) | Component::Away(c) => c.is_clock(),
+                        _ => false,
                     }
                 }
                 pub fn is_counter(&self) -> bool {
                     match self {
                         Component::Global(c) => c.is_counter(),
                         Component::Home(c) | Component::Away(c) => c.is_counter(),
+                        _ => false,
                     }
                 }
                 pub fn is_toggle(&self) -> bool {
                     match self {
                         Component::Global(c) => c.is_toggle(),
                         Component::Home(c) | Component::Away(c) => c.is_toggle(),
+                        _ => false,
                     }
                 }
                 pub fn is_label(&self) -> bool {
                     match self {
                         Component::Global(c) => c.is_label(),
                         Component::Home(c) | Component::Away(c) => c.is_label(),
+                        _ => false,
                     }
                 }
             }
@@ -121,6 +126,12 @@ generate_components!(
         label:
             - TeamName
 );
+
+impl Component {
+    fn is_event_component_relevant(&self, event_component: &Component) -> bool {
+        self == event_component || event_component == &Component::All
+    }
+}
 
 impl<'a> FromParam<'a> for TeamComponent {
     type Error = ParseError;

@@ -24,6 +24,10 @@ impl InteralToggle {
         }
     }
     fn process_event(&mut self, event: &LogEvent) {
+        if let Event::Reset = &event.event {
+            self.state = ToggleState::Inactive;
+            return;
+        }
         let Event::Toggle(counter_event) = &event.event else {
             return;
         };
@@ -71,7 +75,10 @@ impl Toggle {
         });
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
-                if log_event.component != self.component {
+                if !self
+                    .component
+                    .is_event_component_relevant(&log_event.component)
+                {
                     continue;
                 }
                 self.toggle.data.lock().unwrap().process_event(&log_event);
@@ -109,10 +116,9 @@ impl Siren {
         });
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
-                if !matches!(
-                    log_event.component,
-                    Component::Global(GlobalComponent::Siren)
-                ) {
+                if !Component::Global(GlobalComponent::Siren)
+                    .is_event_component_relevant(&log_event.component)
+                {
                     continue;
                 }
                 self.state.data.lock().unwrap().process_event(&log_event);

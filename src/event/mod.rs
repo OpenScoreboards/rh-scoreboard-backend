@@ -21,6 +21,7 @@ pub enum Event {
     Counter(CounterEvent),
     Toggle(ToggleEvent),
     Label(LabelEvent),
+    Reset,
 }
 
 #[derive(Debug, Clone)]
