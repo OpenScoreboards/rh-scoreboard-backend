@@ -168,7 +168,14 @@ impl GameClock {
     }
     pub async fn run(mut self) {
         start_data_channel_manager(self.clock.clone(), self.data_channel);
+        start_expiry_watcher(
+            Component::Global(GlobalComponent::GameClock),
+            true,
+            self.event_channel.sender(),
+            self.typed_data_channel.sender(),
+        );
         start_typed_data_channel_manager(self.clock.clone(), self.typed_data_channel);
+
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
                 if !Component::Global(GlobalComponent::GameClock)
@@ -258,7 +265,14 @@ impl GameDependentClock {
     }
     pub async fn run(mut self) {
         start_data_channel_manager(self.clock.clone(), self.data_channel);
+        start_expiry_watcher(
+            Component::Global(GlobalComponent::ShotClock),
+            false,
+            self.event_channel.sender(),
+            self.typed_data_channel.sender(),
+        );
         start_typed_data_channel_manager(self.clock.clone(), self.typed_data_channel);
+
         tokio::spawn(async move {
             while let Ok(log_event) = self.event_channel.recv().await {
                 if !matches!(
@@ -275,6 +289,63 @@ impl GameDependentClock {
                     .is_event_component_relevant(&log_event.component)
                 {
                     continue;
+                }
+                self.clock.data.lock().unwrap().process_event(&log_event);
+            }
+        });
+    }
+}
+
+#[derive(Debug)]
+pub struct StoppageClock {
+    component: Component,
+    clock: Shareable<ClockComponent>,
+    event_channel: MessageChannel<LogEvent>,
+    data_channel: MessageChannel<Value>,
+    typed_data_channel: MessageChannel<Option<(ClockState, Instant, Duration)>>,
+}
+impl StoppageClock {
+    pub fn new(
+        event_send: Sender<LogEvent>,
+        data_log_send: Sender<Value>,
+        component: Component,
+        name: &str,
+        typed_data_send: Sender<Option<(ClockState, Instant, Duration)>>,
+    ) -> Self {
+        Self {
+            component,
+            clock: ClockComponent::new(name.into()).into(),
+            event_channel: event_send.into(),
+            data_channel: data_log_send.into(),
+            typed_data_channel: typed_data_send.into(),
+        }
+    }
+    pub async fn run(mut self) {
+        start_data_channel_manager(self.clock.clone(), self.data_channel);
+        start_expiry_watcher(
+            self.component,
+            true,
+            self.event_channel.sender(),
+            self.typed_data_channel.sender(),
+        );
+        start_typed_data_channel_manager(self.clock.clone(), self.typed_data_channel);
+
+        tokio::spawn(async move {
+            while let Ok(log_event) = self.event_channel.recv().await {
+                if !self
+                    .component
+                    .is_event_component_relevant(&log_event.component)
+                {
+                    continue;
+                }
+                if let Event::Clock(ClockEvent::Start(Some(_))) = log_event.event {
+                    self.event_channel
+                        .send(LogEvent {
+                            component: Component::Global(GlobalComponent::GameClock),
+                            event: Event::Clock(ClockEvent::Stop(None)),
+                            ..log_event
+                        })
+                        .expect("game clock stop message failed to send");
                 }
                 self.clock.data.lock().unwrap().process_event(&log_event);
             }

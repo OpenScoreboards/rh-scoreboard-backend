@@ -71,6 +71,11 @@ pub struct MessageChannel<T: Clone> {
     send: Sender<T>,
     recv: Receiver<T>,
 }
+impl<T: Clone> MessageChannel<T> {
+    pub fn sender(&self) -> Sender<T> {
+        self.send.clone()
+    }
+}
 impl<T: Clone> From<Sender<T>> for MessageChannel<T> {
     fn from(send: Sender<T>) -> Self {
         Self {

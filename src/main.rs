@@ -7,7 +7,7 @@ mod event;
 use std::time::Duration;
 
 use component::{
-    clock::{start_expiry_watcher, GameClock, GameDependentClock},
+    clock::{start_expiry_watcher, GameClock, GameDependentClock, StoppageClock},
     counter::{Counter, TeamFoulCounter},
     label::Label,
     toggle::{Siren, Toggle},
@@ -16,11 +16,16 @@ use component::{
 use event::states::{CounterEvent, LabelEvent, ToggleEvent};
 use event::{states::ClockEvent, Event, LogEvent};
 use rocket::{
-    fairing::{Fairing, Info, Kind}, fs::FileServer, futures::SinkExt, http::Header, tokio::{
+    fairing::{Fairing, Info, Kind},
+    fs::FileServer,
+    futures::SinkExt,
+    http::Header,
+    tokio::{
         self,
         sync::broadcast::{self, error::RecvError, Sender},
         time::sleep,
-    }, Request, Response, State
+    },
+    Request, Response, State,
 };
 use serde_json::{Map, Value};
 use ws::Message;
@@ -427,12 +432,14 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
 
     let game_clock_data = create_data_channel();
     let shot_clock_data = create_data_channel();
+    let time_out_clock_data = create_data_channel();
 
     run_components!(
         send,
         data_channels,
         GameClock { game_clock_data.clone() },
         GameDependentClock { C::Global(GC::ShotClock), "shot_clock", shot_clock_data.clone() },
+        StoppageClock { C::Global(GC::TimeOutClock), "time_out_clock", time_out_clock_data.clone() },
         Siren { },
         Counter { C::Global(GC::Period), "period", 1 },
         Counter { C::Home(TC::Score), "home_score", 0 },
@@ -445,19 +452,6 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
         Toggle { C::Away(TC::TimeOutWarning), "away_team_timeout" },
         Label { C::Home(TC::TeamName), "home", "Home" },
         Label { C::Away(TC::TeamName), "away", "Away" },
-    );
-
-    start_expiry_watcher(
-        C::Global(GC::GameClock),
-        true,
-        send.clone(),
-        game_clock_data,
-    );
-    start_expiry_watcher(
-        C::Global(GC::ShotClock),
-        false,
-        send.clone(),
-        shot_clock_data,
     );
 }
 
