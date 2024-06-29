@@ -347,7 +347,7 @@ impl StoppageClock {
                 {
                     continue;
                 }
-                if let Event::Clock(ClockEvent::Start(Some(_))) = log_event.event {
+                if let Event::Clock(ClockEvent::Start(_)) = log_event.event {
                     self.event_channel
                         .send(LogEvent {
                             component: Component::Global(GlobalComponent::GameClock),
