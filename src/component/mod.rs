@@ -108,7 +108,7 @@ generate_components!(
         clock:
             - GameClock
             - ShotClock
-            - TimeOutClock
+            - StoppageClock
         counter:
             - Period
         toggle:

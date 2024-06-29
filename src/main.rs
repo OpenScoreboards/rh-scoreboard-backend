@@ -7,7 +7,7 @@ mod event;
 use std::time::Duration;
 
 use component::{
-    clock::{start_expiry_watcher, GameClock, GameDependentClock, StoppageClock},
+    clock::{GameClock, GameDependentClock, StoppageClock},
     counter::{Counter, TeamFoulCounter},
     label::Label,
     toggle::{Siren, Toggle},
@@ -432,14 +432,14 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
 
     let game_clock_data = create_data_channel();
     let shot_clock_data = create_data_channel();
-    let time_out_clock_data = create_data_channel();
+    let stoppage_clock_data = create_data_channel();
 
     run_components!(
         send,
         data_channels,
         GameClock { game_clock_data.clone() },
         GameDependentClock { C::Global(GC::ShotClock), "shot_clock", shot_clock_data.clone() },
-        StoppageClock { C::Global(GC::TimeOutClock), "time_out_clock", time_out_clock_data.clone() },
+        StoppageClock { C::Global(GC::StoppageClock), "stoppage_clock", stoppage_clock_data.clone() },
         Siren { },
         Counter { C::Global(GC::Period), "period", 1 },
         Counter { C::Home(TC::Score), "home_score", 0 },
