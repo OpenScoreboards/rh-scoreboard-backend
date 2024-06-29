@@ -17,8 +17,8 @@ struct InternalCounter {
     name: String,
 }
 impl InternalCounter {
-    pub fn new(name: String) -> Self {
-        InternalCounter { value: 0, name }
+    pub fn new(name: String, value: u64) -> Self {
+        InternalCounter { value, name }
     }
     fn process_event(&mut self, event: &LogEvent) {
         let Event::Counter(counter_event) = &event.event else {
@@ -42,14 +42,15 @@ pub struct Counter {
 }
 impl Counter {
     pub fn new(
-        component: Component,
-        name: &str,
         event_send: Sender<LogEvent>,
         data_log_send: Sender<Value>,
+        component: Component,
+        name: &str,
+        value: u64,
     ) -> Self {
         Self {
             component,
-            counter: InternalCounter::new(name.into()).into(),
+            counter: InternalCounter::new(name.into(), value).into(),
             event_channel: event_send.into(),
             data_channel: data_log_send.into(),
         }
@@ -86,14 +87,14 @@ pub struct TeamFoulCounter {
 }
 impl TeamFoulCounter {
     pub fn new(
-        component: Component,
-        name: &str,
         event_send: Sender<LogEvent>,
         data_log_send: Sender<Value>,
+        component: Component,
+        name: &str,
     ) -> Self {
         Self {
             component,
-            counter: InternalCounter::new(name.into()).into(),
+            counter: InternalCounter::new(name.into(), 0).into(),
             event_channel: event_send.into(),
             data_channel: data_log_send.into(),
         }

@@ -44,10 +44,10 @@ pub struct Toggle {
 }
 impl Toggle {
     pub fn new(
-        component: Component,
-        name: &str,
         event_send: Sender<LogEvent>,
         data_log_send: Sender<Value>,
+        component: Component,
+        name: &str,
     ) -> Self {
         Self {
             component,

@@ -35,14 +35,15 @@ pub struct Label {
 }
 impl Label {
     pub fn new(
-        component: Component,
-        name: &str,
         event_send: Sender<LogEvent>,
         data_log_send: Sender<Value>,
+        component: Component,
+        name: &str,
+        value: &str,
     ) -> Self {
         Self {
             component,
-            label: InternalLabel::new(name.into(), name.into()).into(),
+            label: InternalLabel::new(name.into(), value.into()).into(),
             event_channel: event_send.into(),
             data_channel: data_log_send.into(),
         }

@@ -378,21 +378,14 @@ fn create_data_channel<T: Clone>() -> Sender<T> {
     broadcast::channel::<T>(512).0
 }
 
-macro_rules! run_unique_component {
-    ($typ: ident, $send: expr, $data_channels: expr $(,)?) => {{
-        let data_channel = create_data_channel();
-        let component = $typ::new($send.clone(), data_channel.clone());
-        tokio::spawn(async move { component.run().await });
-        $data_channels.push(data_channel.clone());
-        data_channel
-    }};
-}
-macro_rules! run_component {
-    ($typ: ident, $component: expr, $name: expr, $send: expr, $data_channels: expr $(,)?) => {
-        let data_channel = create_data_channel();
-        let component = $typ::new($component, $name, $send.clone(), data_channel.clone());
-        tokio::spawn(async move { component.run().await });
-        $data_channels.push(data_channel);
+macro_rules! run_components {
+    ($send: expr, $data_channels: expr, $($typ: ident { $($arg: expr),* },)* ) => {
+        $(
+            let data_channel = create_data_channel();
+            let component = $typ::new($send.clone(), data_channel.clone(), $($arg),*);
+            tokio::spawn(async move { component.run().await });
+            $data_channels.push(data_channel);
+        )+
     };
 }
 pub struct CORS;
@@ -422,110 +415,40 @@ fn add_components(send: Sender<LogEvent>, data_channels: &mut Vec<Sender<Value>>
     use GlobalComponent as GC;
     use TeamComponent as TC;
 
-    let game_clock_data_channel = create_data_channel();
-    let game_clock_typed_data_channel = create_data_channel();
-    let component = GameClock::new(
-        send.clone(),
-        game_clock_data_channel.clone(),
-        game_clock_typed_data_channel.clone(),
+    let game_clock_data = create_data_channel();
+    let shot_clock_data = create_data_channel();
+
+    run_components!(
+        send,
+        data_channels,
+        GameClock { game_clock_data.clone() },
+        GameDependentClock { C::Global(GC::ShotClock), "shot_clock", shot_clock_data.clone() },
+        Siren { },
+        Counter { C::Global(GC::Period), "period", 1 },
+        Counter { C::Home(TC::Score), "home_score", 0 },
+        Counter { C::Away(TC::Score), "away_score", 0 },
+        TeamFoulCounter { C::Home(TC::TeamFouls), "home_tf" },
+        TeamFoulCounter { C::Away(TC::TeamFouls), "away_tf" },
+        Toggle { C::Home(TC::TeamFoulWarning), "home_team_foul_warning" },
+        Toggle { C::Away(TC::TeamFoulWarning), "away_team_foul_warning" },
+        Toggle { C::Home(TC::TimeOutWarning), "home_team_timeout" },
+        Toggle { C::Away(TC::TimeOutWarning), "away_team_timeout" },
+        Label { C::Home(TC::TeamName), "home", "Home" },
+        Label { C::Away(TC::TeamName), "away", "Away" },
     );
-    tokio::spawn(async move { component.run().await });
-    data_channels.push(game_clock_data_channel);
 
     start_expiry_watcher(
-        Component::Global(GC::GameClock),
+        C::Global(GC::GameClock),
         true,
         send.clone(),
-        game_clock_typed_data_channel,
-    );
-    run_unique_component!(Siren, send, data_channels);
-    run_component!(
-        Counter,
-        Component::Global(GlobalComponent::Period),
-        "period",
-        send,
-        data_channels,
-    );
-
-    let shot_clock_data_channel = create_data_channel();
-    let shot_clock_typed_data_channel = create_data_channel();
-    let component = GameDependentClock::new(
-        C::Global(GC::ShotClock),
-        "shot_clock",
-        send.clone(),
-        shot_clock_data_channel.clone(),
-        shot_clock_typed_data_channel.clone(),
+        game_clock_data,
     );
     start_expiry_watcher(
-        Component::Global(GC::ShotClock),
+        C::Global(GC::ShotClock),
         false,
         send.clone(),
-        shot_clock_typed_data_channel,
+        shot_clock_data,
     );
-    tokio::spawn(async move { component.run().await });
-    data_channels.push(shot_clock_data_channel);
-    run_component!(
-        Counter,
-        C::Home(TC::Score),
-        "home_score",
-        send,
-        data_channels,
-    );
-    run_component!(
-        Counter,
-        C::Away(TC::Score),
-        "away_score",
-        send,
-        data_channels,
-    );
-
-    run_component!(
-        TeamFoulCounter,
-        C::Home(TC::TeamFouls),
-        "home_tf",
-        send,
-        data_channels
-    );
-    run_component!(
-        TeamFoulCounter,
-        C::Away(TC::TeamFouls),
-        "away_tf",
-        send,
-        data_channels,
-    );
-
-    run_component!(
-        Toggle,
-        C::Home(TC::TeamFoulWarning),
-        "home_team_foul_warning",
-        send,
-        data_channels,
-    );
-    run_component!(
-        Toggle,
-        C::Away(TC::TeamFoulWarning),
-        "away_team_foul_warning",
-        send,
-        data_channels,
-    );
-
-    run_component!(
-        Toggle,
-        C::Home(TC::TimeOutWarning),
-        "home_team_timeout",
-        send,
-        data_channels,
-    );
-    run_component!(
-        Toggle,
-        C::Away(TC::TimeOutWarning),
-        "away_team_timeout",
-        send,
-        data_channels,
-    );
-
-    run_component!(Label, C::Home(TC::TeamName), "home", send, data_channels,);
-    run_component!(Label, C::Away(TC::TeamName), "away", send, data_channels,);
 }
 
 #[launch]

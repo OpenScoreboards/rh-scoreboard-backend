@@ -210,10 +210,10 @@ pub struct GameDependentClock {
 }
 impl GameDependentClock {
     pub fn new(
-        component: Component,
-        name: &str,
         event_send: Sender<LogEvent>,
         data_log_send: Sender<Value>,
+        component: Component,
+        name: &str,
         typed_data_send: Sender<Option<(ClockState, Instant, Duration)>>,
     ) -> Self {
         Self {
